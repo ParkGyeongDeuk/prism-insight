@@ -1,0 +1,27 @@
+services:
+  prism-insight:
+    environment:
+      - ENABLE_CRON=${PRISM_ENABLE_CRON:-false}
+      - PRISM_OPENAI_AUTH_MODE=${PRISM_OPENAI_AUTH_MODE:-chatgpt_oauth}
+      - PRISM_OAUTH_CALLBACK_HOST=${PRISM_OAUTH_CALLBACK_HOST:-0.0.0.0}
+
+    volumes:
+      # Keep KIS credentials outside the image and persist ChatGPT OAuth tokens.
+      - ./trading/config/kis_devlp.yaml:/app/prism-insight/trading/config/kis_devlp.yaml
+      - prism-auth:/root/.config/prism-insight
+      - ./docker/crontab.kd:/app/prism-insight/docker/crontab:ro
+
+    # OAuth redirects to localhost; expose the callback only on this Mac.
+    ports:
+      - "127.0.0.1:1455:1455"
+
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          python3 -c 'import sys; sys.exit(0)' &&
+          if [ "$${ENABLE_CRON}" = "true" ]; then service cron status; else exit 0; fi
+
+volumes:
+  prism-auth:
+    driver: local

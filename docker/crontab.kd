@@ -1,0 +1,8 @@
+# PRISM-INSIGHT local schedule: KR analysis and Telegram delivery only.
+SHELL=/bin/bash
+PATH=/app/venv/bin:/root/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+PYTHONPATH=/app/prism-insight
+
+# Morning and afternoon analysis (KST, Monday-Friday).
+30 9 * * 1-5 cd /app/prism-insight && python3 stock_analysis_orchestrator.py --mode morning >> /app/prism-insight/logs/kr_morning_$(date +\%Y\%m\%d).log 2>&1
+40 15 * * 1-5 cd /app/prism-insight && python3 stock_analysis_orchestrator.py --mode afternoon >> /app/prism-insight/logs/kr_afternoon_$(date +\%Y\%m\%d).log 2>&1

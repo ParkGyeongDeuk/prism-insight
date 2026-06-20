@@ -23,6 +23,7 @@ from .constants import (
     OAUTH_AUTHORIZE_URL,
     OAUTH_TOKEN_URL,
     OAUTH_SCOPE,
+    OAUTH_CALLBACK_HOST,
     OAUTH_CALLBACK_PORT,
     OAUTH_REDIRECT_URI,
     AUTH_DIR,
@@ -158,11 +159,15 @@ async def login(force: bool = False) -> dict:
 
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, "127.0.0.1", OAUTH_CALLBACK_PORT)
+    site = web.TCPSite(runner, OAUTH_CALLBACK_HOST, OAUTH_CALLBACK_PORT)
 
     try:
         await site.start()
-        logger.info(f"Callback server started on port {OAUTH_CALLBACK_PORT}")
+        logger.info(
+            "Callback server started on %s:%s",
+            OAUTH_CALLBACK_HOST,
+            OAUTH_CALLBACK_PORT,
+        )
 
         # Open browser
         print(f"\nOpening browser for ChatGPT login...")

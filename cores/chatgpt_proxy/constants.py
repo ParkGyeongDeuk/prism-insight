@@ -11,6 +11,14 @@ OAUTH_SCOPE = "openid profile email offline_access"
 OAUTH_CALLBACK_PORT = 1455
 OAUTH_REDIRECT_URI = f"http://localhost:{OAUTH_CALLBACK_PORT}/auth/callback"
 
+
+def _resolve_callback_host() -> str:
+    """Return the callback bind address while preserving the local default."""
+    return os.getenv("PRISM_OAUTH_CALLBACK_HOST", "127.0.0.1").strip() or "127.0.0.1"
+
+
+OAUTH_CALLBACK_HOST = _resolve_callback_host()
+
 # ChatGPT API
 CHATGPT_API_BASE = "https://chatgpt.com/backend-api/codex"
 CHATGPT_RESPONSES_URL = f"{CHATGPT_API_BASE}/responses"
