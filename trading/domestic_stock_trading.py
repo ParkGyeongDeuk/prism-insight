@@ -166,10 +166,10 @@ class DomesticStockTrading:
             logger.error("   1. Open trading/config/kis_devlp.yaml")
             logger.error(f"   2. For {self.mode} mode:")
             if self.mode == "real":
-                logger.error("      - 'my_app' should start with 'PS' (NOT 'PSVT')")
+                logger.error("      - 'my_app'/'my_sec' must be issued for real trading")
                 logger.error("      - 'accounts'에 실전투자 계좌를 올바르게 설정하세요")
             else:
-                logger.error("      - 'paper_app' should start with 'PSVT'")
+                logger.error("      - 'paper_app'/'paper_sec' must be issued for demo trading")
                 logger.error("      - 'accounts'에 모의투자 계좌를 올바르게 설정하세요")
             logger.error("=" * 60)
             raise RuntimeError(f"Credential mismatch for {self.mode} mode: {e}") from e

@@ -725,10 +725,11 @@ def cleanup_old_tokens():
 # ============== Credential Validation ==============
 def validate_credentials(app_key: str, mode: str) -> Tuple[bool, str]:
     """
-    Validate app key matches the trading mode to prevent credential mismatch errors.
+    Validate the basic app key shape before requesting a token.
 
-    - Real mode (prod): App key should start with 'PS' but NOT 'PSVT'
-    - Demo mode (vps): App key should start with 'PSVT'
+    KIS app-key prefixes are not a documented public contract and have changed
+    over time. The selected prod/vps token endpoint is therefore the authority
+    for determining whether a key belongs to the requested environment.
 
     Args:
         app_key: The KIS app key
@@ -739,22 +740,6 @@ def validate_credentials(app_key: str, mode: str) -> Tuple[bool, str]:
     """
     if not app_key or len(app_key) < 10:
         return False, "App key is empty or too short"
-
-    is_demo_key = app_key.startswith('PSVT')
-
-    if mode == 'prod' and is_demo_key:
-        return False, (
-            "CREDENTIAL MISMATCH! Using DEMO app key (PSVT*) in REAL mode.\n"
-            "Check kis_devlp.yaml - 'my_app' should be your real trading key (PS*, not PSVT*).\n"
-            "This is the most common cause of 'Error Code: 500' authentication failures."
-        )
-
-    if mode == 'vps' and not is_demo_key and app_key.startswith('PS'):
-        return False, (
-            "CREDENTIAL MISMATCH! Using REAL app key (PS*) in DEMO mode.\n"
-            "Check kis_devlp.yaml - 'paper_app' should be your demo key (PSVT*).\n"
-            "Using real credentials in demo mode may cause unexpected behavior."
-        )
 
     return True, ""
 
