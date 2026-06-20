@@ -75,6 +75,10 @@ RUN pip install --no-cache-dir --upgrade pip setuptools && \
 # 로컬 워크스페이스를 이미지에 복사
 COPY . /app/prism-insight
 
+# KRX may show an in-page confirmation for an already logged-in account.
+# Patch the third-party client narrowly and fail the build if upstream changed.
+RUN python3 utils/patch_krx_data_client.py
+
 # Playwright 브라우저 설치 (Chromium만)
 RUN playwright install --with-deps chromium
 
