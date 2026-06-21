@@ -42,6 +42,15 @@ def _now_kst() -> datetime.datetime:
     return datetime.datetime.now(KST)
 
 
+def _is_domestic_market_day(now: Optional[datetime.datetime] = None) -> bool:
+    """Return whether the KST date is open for Korean stock trading."""
+    from check_market_day import is_market_day
+
+    now = now or _now_kst()
+    market_date = now.astimezone(KST).date() if now.tzinfo else now.date()
+    return is_market_day(market_date)
+
+
 def _domestic_order_window(now: Optional[datetime.datetime] = None) -> str:
     """Classify the Korean domestic stock order window using KST.
 
@@ -577,6 +586,17 @@ class DomesticStockTrading:
             }
 
         now = _now_kst()
+        if not _is_domestic_market_day(now):
+            message = "Korean market is closed on this date. Buy order was not submitted."
+            logger.warning(f"[{stock_code}] {message}")
+            return {
+                'success': False,
+                'order_no': None,
+                'stock_code': stock_code,
+                'quantity': 0,
+                'message': message
+            }
+
         order_window = _domestic_order_window(now)
 
         # Branch by Korean market time (KST), regardless of server/local timezone.
@@ -947,6 +967,17 @@ class DomesticStockTrading:
             }
 
         now = _now_kst()
+        if not _is_domestic_market_day(now):
+            message = "Korean market is closed on this date. Sell order was not submitted."
+            logger.warning(f"[{stock_code}] {message}")
+            return {
+                'success': False,
+                'order_no': None,
+                'stock_code': stock_code,
+                'quantity': 0,
+                'message': message
+            }
+
         order_window = _domestic_order_window(now)
 
         # Branch by Korean market time (KST), regardless of server/local timezone.

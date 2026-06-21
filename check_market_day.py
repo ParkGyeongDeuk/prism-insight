@@ -17,9 +17,9 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-def is_market_day():
-    """Check if it's a Korean stock market trading day"""
-    today = date.today()
+def is_market_day(target_date: date | None = None):
+    """Check whether a date is a Korean stock market trading day."""
+    today = target_date or date.today()
 
     # Weekend check (5: Saturday, 6: Sunday)
     if today.weekday() >= 5:

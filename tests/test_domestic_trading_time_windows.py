@@ -56,6 +56,10 @@ def _dt(hour, minute):
     return datetime.datetime(2026, 6, 1, hour, minute, tzinfo=domestic.KST)
 
 
+def _weekend_dt(hour, minute):
+    return datetime.datetime(2026, 6, 21, hour, minute, tzinfo=domestic.KST)
+
+
 def test_domestic_order_window_uses_kst_regular_market():
     assert domestic._domestic_order_window(_dt(15, 15)) == "regular"
 
@@ -66,6 +70,12 @@ def test_domestic_order_window_blocks_0730_to_0900_reserved_gap():
 
 def test_domestic_order_window_blocks_reserved_maintenance_gap():
     assert domestic._domestic_order_window(_dt(23, 50)) == "unavailable"
+
+
+def test_domestic_market_day_blocks_public_holiday():
+    holiday = datetime.datetime(2026, 5, 5, 15, 15, tzinfo=domestic.KST)
+
+    assert domestic._is_domestic_market_day(holiday) is False
 
 
 def test_smart_buy_uses_market_order_at_1515_kst(monkeypatch):
@@ -89,6 +99,17 @@ def test_smart_buy_does_not_submit_reserved_order_in_0815_kst_gap(monkeypatch):
     assert trader.called is None
 
 
+def test_smart_buy_does_not_submit_order_on_weekend(monkeypatch):
+    trader = _DummyDomesticTrader()
+    monkeypatch.setattr(domestic, "_now_kst", lambda: _weekend_dt(15, 15))
+
+    result = domestic.DomesticStockTrading.smart_buy(cast(Any, trader), "005935", buy_amount=100000)
+
+    assert result["success"] is False
+    assert "market is closed" in result["message"]
+    assert trader.called is None
+
+
 def test_smart_sell_uses_market_order_at_1515_kst(monkeypatch):
     trader = _DummyDomesticTrader()
     monkeypatch.setattr(domestic, "_now_kst", lambda: _dt(15, 15))
@@ -97,3 +118,14 @@ def test_smart_sell_uses_market_order_at_1515_kst(monkeypatch):
 
     assert result["method"] == "market"
     assert trader.called == ("sell_all_market_price", "005935", 3)
+
+
+def test_smart_sell_does_not_submit_order_on_weekend(monkeypatch):
+    trader = _DummyDomesticTrader()
+    monkeypatch.setattr(domestic, "_now_kst", lambda: _weekend_dt(15, 15))
+
+    result = domestic.DomesticStockTrading.smart_sell_all(cast(Any, trader), "005935", quantity=3)
+
+    assert result["success"] is False
+    assert "market is closed" in result["message"]
+    assert trader.called is None
