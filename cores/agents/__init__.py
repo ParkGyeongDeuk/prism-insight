@@ -32,6 +32,7 @@ def get_agent_directory(company_name, company_code, reference_date, base_section
         create_sell_decision_agent
     )
     from cores.utils import get_wise_report_url
+    from cores.agents.mcp_availability import is_mcp_api_key_configured
 
     # Create URL mapping
     urls = {k: get_wise_report_url(k, company_code) for k in [
@@ -47,6 +48,10 @@ def get_agent_directory(company_name, company_code, reference_date, base_section
 
     # Extract prefetched data for each agent
     pf = prefetched_data or {}
+    use_perplexity = is_mcp_api_key_configured(
+        "perplexity",
+        "PERPLEXITY_API_KEY",
+    )
 
     agent_creators = {
         "price_volume_analysis": lambda: create_price_volume_analysis_agent(
@@ -64,12 +69,14 @@ def get_agent_directory(company_name, company_code, reference_date, base_section
             company_name, company_code, reference_date, urls, language
         ),
         "news_analysis": lambda: create_news_analysis_agent(
-            company_name, company_code, reference_date, language
+            company_name, company_code, reference_date, language,
+            use_perplexity=use_perplexity,
         ),
         "market_index_analysis": lambda: create_market_index_analysis_agent(
             reference_date, max_years_ago, max_years, language,
             prefetched_kospi=pf.get("kospi_index"),
-            prefetched_kosdaq=pf.get("kosdaq_index")
+            prefetched_kosdaq=pf.get("kosdaq_index"),
+            use_perplexity=use_perplexity,
         )
     }
     

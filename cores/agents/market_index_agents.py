@@ -1,7 +1,15 @@
 from mcp_agent.agents.agent import Agent
 
 
-def create_market_index_analysis_agent(reference_date, max_years_ago, max_years, language: str = "ko", prefetched_kospi: str = None, prefetched_kosdaq: str = None):
+def create_market_index_analysis_agent(
+    reference_date,
+    max_years_ago,
+    max_years,
+    language: str = "ko",
+    prefetched_kospi: str = None,
+    prefetched_kosdaq: str = None,
+    use_perplexity: bool = True,
+):
     """Create market index analysis agent
 
     Args:
@@ -308,11 +316,30 @@ def create_market_index_analysis_agent(reference_date, max_years_ago, max_years,
         instruction = instruction.replace("- 반드시 tool call을 통해 실제 데이터를 수집해야 합니다", "- 사전 수집된 데이터와 perplexity 검색 결과를 기반으로 분석합니다")
         instruction = instruction.replace("- You must make a tool call to collect actual data", "- Analyze based on the pre-collected data and perplexity search results")
 
-    # When index data is prefetched, only need perplexity for market news
+    # When index data is prefetched, only optional market-news search remains.
     if prefetched_kospi and prefetched_kosdaq:
-        server_list = ["perplexity"]
+        server_list = ["perplexity"] if use_perplexity else []
     else:
-        server_list = ["kospi_kosdaq", "perplexity"]
+        server_list = ["kospi_kosdaq"]
+        if use_perplexity:
+            server_list.append("perplexity")
+
+    if not use_perplexity and language == "en":
+        instruction += """
+
+## Available Data Sources (Overrides Earlier Perplexity Instructions)
+- Perplexity is not configured. Do not call or cite Perplexity.
+- Base the report on the collected or pre-collected KOSPI/KOSDAQ index data.
+- Do not invent same-day macroeconomic or global causes. Mark those sections as unverified when the index data alone cannot support them.
+"""
+    elif not use_perplexity:
+        instruction += """
+
+## 사용 가능한 데이터 출처 (앞선 Perplexity 지시보다 우선)
+- Perplexity가 설정되지 않았으므로 Perplexity를 호출하거나 출처로 인용하지 마세요.
+- 수집되었거나 사전 수집된 KOSPI/KOSDAQ 지수 데이터를 중심으로 분석하세요.
+- 지수 데이터만으로 확인할 수 없는 당일 거시경제·글로벌 원인은 추정하지 말고 미확인으로 명시하세요.
+"""
 
     return Agent(
         name="market_index_analysis_agent",

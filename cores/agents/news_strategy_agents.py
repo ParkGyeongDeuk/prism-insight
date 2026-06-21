@@ -1,7 +1,13 @@
 from mcp_agent.agents.agent import Agent
 
 
-def create_news_analysis_agent(company_name, company_code, reference_date, language: str = "ko"):
+def create_news_analysis_agent(
+    company_name,
+    company_code,
+    reference_date,
+    language: str = "ko",
+    use_perplexity: bool = True,
+):
     """Create news analysis agent
 
     Args:
@@ -244,8 +250,28 @@ def create_news_analysis_agent(company_name, company_code, reference_date, langu
                         분석일: {reference_date}(YYYYMMDD 형식)
                         """
 
+    server_names = ["firecrawl"]
+    if use_perplexity:
+        server_names.insert(0, "perplexity")
+    elif language == "en":
+        instruction += """
+
+## Available Data Sources (Overrides Earlier Perplexity Instructions)
+- Perplexity is not configured. Do not call or cite Perplexity.
+- Use the target company's Naver Finance news collected through Firecrawl.
+- If sector-leader or sector-trend evidence is insufficient, state that limitation explicitly instead of guessing.
+"""
+    else:
+        instruction += """
+
+## 사용 가능한 데이터 출처 (앞선 Perplexity 지시보다 우선)
+- Perplexity가 설정되지 않았으므로 Perplexity를 호출하거나 출처로 인용하지 마세요.
+- Firecrawl로 수집한 대상 기업의 네이버 금융 뉴스만 사용하세요.
+- 섹터 주도주나 업종 동향 근거가 부족하면 추정하지 말고 데이터 부족을 명시하세요.
+"""
+
     return Agent(
         name="news_analysis_agent",
         instruction=instruction,
-        server_names=["perplexity", "firecrawl"]
+        server_names=server_names,
     )
