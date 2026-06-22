@@ -2,8 +2,8 @@
 OpenAI Responses API LLM for mcp-agent trading agents.
 
 Replaces Chat Completions (client.chat.completions.create) with the Responses API
-(client.responses.create), using previous_response_id so only tool results—not the
-full accumulated message history—are re-sent on each tool-call iteration.
+(client.responses.create). It uses previous_response_id when supported and falls
+back to locally accumulated history for stateless OAuth proxy endpoints.
 
 Drop-in replacement: swap attach_llm(OpenAIAugmentedLLM) →
                                attach_llm(OpenAIResponsesLLM)
@@ -11,7 +11,7 @@ Drop-in replacement: swap attach_llm(OpenAIAugmentedLLM) →
 import json
 from typing import List, Optional
 
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, BadRequestError
 from mcp.types import (
     CallToolRequest,
     CallToolRequestParams,
@@ -29,9 +29,9 @@ class OpenAIResponsesLLM(OpenAIAugmentedLLM):
     OpenAIAugmentedLLM variant that drives the agentic tool-call loop via the
     Responses API instead of Chat Completions.
 
-    Token efficiency improvement: after the first turn, only the new tool results
-    (not the entire conversation history) are sent to OpenAI on each iteration,
-    because the server tracks state via previous_response_id.
+    Token efficiency improvement: stateful providers receive only new tool results
+    after the first turn. Stateless providers receive locally accumulated history
+    so tool-call context remains intact.
     """
 
     async def generate_str(
@@ -94,6 +94,8 @@ class OpenAIResponsesLLM(OpenAIAugmentedLLM):
             raise RuntimeError("OpenAI provider config is missing from mcp_agent.config.yaml")
 
         previous_response_id: Optional[str] = None
+        use_previous_response_id = True
+        conversation_items = list(input_items)
         final_text = ""
 
         async with AsyncOpenAI(
@@ -103,11 +105,31 @@ class OpenAIResponsesLLM(OpenAIAugmentedLLM):
             for i in range(params.max_iterations):
                 self._log_chat_progress(chat_turn=i, model=model)
 
-                call_kwargs = {**base_kwargs, "input": input_items}
-                if previous_response_id:
+                call_kwargs = {
+                    **base_kwargs,
+                    "input": (
+                        input_items
+                        if use_previous_response_id
+                        else conversation_items
+                    ),
+                }
+                if previous_response_id and use_previous_response_id:
                     call_kwargs["previous_response_id"] = previous_response_id
 
-                response = await client.responses.create(**call_kwargs)  # type: ignore[attr-defined]
+                try:
+                    response = await client.responses.create(**call_kwargs)  # type: ignore[attr-defined]
+                except BadRequestError:
+                    if not previous_response_id or not use_previous_response_id:
+                        raise
+
+                    # The ChatGPT OAuth Codex endpoint uses store=False and does
+                    # not support previous_response_id. Retry with the complete
+                    # local conversation while preserving the efficient stateful
+                    # path for providers that support it.
+                    use_previous_response_id = False
+                    call_kwargs.pop("previous_response_id", None)
+                    call_kwargs["input"] = conversation_items
+                    response = await client.responses.create(**call_kwargs)  # type: ignore[attr-defined]
                 previous_response_id = response.id
 
                 # Separate text content and function calls from output items
@@ -127,7 +149,20 @@ class OpenAIResponsesLLM(OpenAIAugmentedLLM):
 
                 # Execute all tool calls via MCP and collect results
                 tool_result_items = []
+                assistant_items = []
+                if text_parts:
+                    assistant_items.append(
+                        {"role": "assistant", "content": "\n".join(text_parts)}
+                    )
                 for fc in function_calls:
+                    assistant_items.append(
+                        {
+                            "type": "function_call",
+                            "name": fc.name,
+                            "arguments": fc.arguments,
+                            "call_id": fc.call_id,
+                        }
+                    )
                     result_str = await self._call_mcp_tool(
                         name=fc.name,
                         arguments=fc.arguments,
@@ -141,7 +176,11 @@ class OpenAIResponsesLLM(OpenAIAugmentedLLM):
                         }
                     )
 
-                # Next iteration only sends tool results; full context lives server-side
+                conversation_items.extend(assistant_items)
+                conversation_items.extend(tool_result_items)
+
+                # Stateful providers need only tool results. The fallback uses
+                # conversation_items assembled above.
                 input_items = tool_result_items
 
         self._log_chat_finished(model=model)

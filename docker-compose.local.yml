@@ -4,6 +4,7 @@ services:
       - ENABLE_CRON=${PRISM_ENABLE_CRON:-false}
       - PRISM_OPENAI_AUTH_MODE=${PRISM_OPENAI_AUTH_MODE:-chatgpt_oauth}
       - PRISM_OAUTH_CALLBACK_HOST=${PRISM_OAUTH_CALLBACK_HOST:-0.0.0.0}
+      - PATH=/root/.local/bin:/app/venv/bin:/root/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
     volumes:
       # Keep KIS credentials outside the image and persist ChatGPT OAuth tokens.

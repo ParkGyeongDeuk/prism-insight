@@ -1,6 +1,6 @@
 # PRISM-INSIGHT local schedule: KR analysis and Telegram delivery only.
 SHELL=/bin/bash
-PATH=/app/venv/bin:/root/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+PATH=/root/.local/bin:/app/venv/bin:/root/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 PYTHONPATH=/app/prism-insight
 
 # Morning and afternoon analysis (KST, Monday-Friday).

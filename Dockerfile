@@ -51,10 +51,10 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
 
 # UV (Python 패키지 관리자) 설치
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
-    echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> /root/.bashrc
+    echo 'export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"' >> /root/.bashrc
 
 # PATH에 UV 추가
-ENV PATH="/root/.cargo/bin:$PATH"
+ENV PATH="/root/.local/bin:/root/.cargo/bin:$PATH"
 
 # Python 가상환경 생성
 RUN python3 -m venv /app/venv
