@@ -278,6 +278,7 @@ def test_demo_revisable_orders_use_supported_daily_inquiry(monkeypatch):
     assert calls[0][1] == "VTTC0081R"
     assert calls[0][2]["CCLD_DVSN"] == "02"
     assert calls[0][2]["INQR_STRT_DT"] == "20260622"
+    assert trader._last_revisable_orders_query_ok is True
     assert orders == [
         {
             "order_no": "1001",
@@ -292,6 +293,23 @@ def test_demo_revisable_orders_use_supported_daily_inquiry(monkeypatch):
             "krx_fwdg_ord_orgno": "12345",
         }
     ]
+
+
+def test_revisable_order_parse_failure_is_not_marked_successful(monkeypatch):
+    trader = dst.DomesticStockTrading.__new__(dst.DomesticStockTrading)
+    trader.mode = "demo"
+    trader.trenv = SimpleNamespace(my_acct="12345678", my_prod="01")
+
+    monkeypatch.setattr(
+        trader,
+        "_request",
+        lambda *_args, **_kwargs: _FakeKISResponse(
+            SimpleNamespace(output1=[None])
+        ),
+    )
+
+    assert trader.get_revisable_orders() == []
+    assert trader._last_revisable_orders_query_ok is False
 
 
 def test_limit_buy_preserves_cancel_identifiers(monkeypatch):

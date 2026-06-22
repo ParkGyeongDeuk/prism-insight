@@ -1544,6 +1544,7 @@ class DomesticStockTrading:
                 'profit_rate': return rate (%)
             }, ...]
         """
+        self._last_portfolio_query_ok = False
         api_url = "/uapi/domestic-stock/v1/trading/inquire-balance"
 
         # Set TR ID (real/demo distinction)
@@ -1600,6 +1601,7 @@ class DomesticStockTrading:
                     total_profit = float(output2.get('evlu_pfls_smtl_amt', 0))
                     logger.info(f"Account total evaluation: {total_eval:,.0f} KRW, total profit/loss: {total_profit:+,.0f} KRW")
 
+                self._last_portfolio_query_ok = True
                 logger.info(f"Portfolio: {len(current_portfolio)} holdings")
                 return current_portfolio
 
@@ -1837,6 +1839,7 @@ class DomesticStockTrading:
                     tot_ccld_qty, psbl_qty, sll_buy_dvsn_cd, ord_dvsn,
                     krx_fwdg_ord_orgno}.
         """
+        self._last_revisable_orders_query_ok = False
         if self.mode == "real":
             api_url = "/uapi/domestic-stock/v1/trading/inquire-psbl-rvsecncl"
             tr_id = "TTTC0084R"
@@ -1911,6 +1914,7 @@ class DomesticStockTrading:
                         or row.get('ord_gno_brno', '')
                     ),
                 })
+            self._last_revisable_orders_query_ok = True
             return out
 
         except Exception as e:

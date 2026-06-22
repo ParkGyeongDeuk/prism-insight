@@ -329,6 +329,64 @@ class StockTrackingAgent:
         account_key, _ = self._account_scope()
         return get_current_slots_count(self.cursor, account_key=account_key)
 
+    async def _broker_tracking_state_matches(self, account: Dict[str, Any] | None = None) -> bool:
+        """Fail closed when KIS holdings/open buys and tracking rows disagree."""
+        from trading.domestic_stock_trading import AsyncTradingContext
+
+        target_account = account or self.active_account or {}
+        account_key = target_account.get("account_key")
+        account_name = target_account.get("name")
+        if not account_key or not account_name:
+            logger.error("Cannot verify broker state: active account metadata is missing")
+            return False
+
+        try:
+            async with AsyncTradingContext(account_name=account_name) as trading:
+                portfolio = await asyncio.to_thread(trading.get_portfolio)
+                if not getattr(trading, "_last_portfolio_query_ok", False):
+                    logger.error("Cannot verify broker state: KIS portfolio inquiry failed")
+                    return False
+
+                await asyncio.sleep(1.1)
+                open_orders = await asyncio.to_thread(trading.get_revisable_orders)
+                if not getattr(trading, "_last_revisable_orders_query_ok", False):
+                    logger.error("Cannot verify broker state: KIS open-order inquiry failed")
+                    return False
+
+            broker_tickers = {
+                str(row.get("stock_code", "")).strip()
+                for row in portfolio
+                if int(row.get("quantity", 0) or 0) > 0
+            }
+            broker_tickers.update(
+                str(row.get("stock_code", "")).strip()
+                for row in open_orders
+                if str(row.get("sll_buy_dvsn_cd", "")).strip() == "02"
+                and int(row.get("psbl_qty", 0) or 0) > 0
+            )
+            broker_tickers.discard("")
+
+            self.cursor.execute(
+                "SELECT DISTINCT ticker FROM stock_holdings WHERE account_key = ?",
+                (account_key,),
+            )
+            tracking_tickers = {
+                str(row[0]).strip() for row in self.cursor.fetchall() if row[0]
+            }
+
+            if broker_tickers != tracking_tickers:
+                logger.error(
+                    "Broker/tracking mismatch for %s: KIS=%s, DB=%s; trading blocked",
+                    self._safe_account_log_label(target_account),
+                    sorted(broker_tickers),
+                    sorted(tracking_tickers),
+                )
+                return False
+            return True
+        except Exception as exc:
+            logger.error("Broker/tracking verification failed: %s", exc)
+            return False
+
     async def _check_sector_diversity(self, sector: str) -> bool:
         """Check for over-concentration in same sector (delegates to tracking.helpers)"""
         account_key, _ = self._account_scope()
@@ -788,7 +846,16 @@ class StockTrackingAgent:
             logger.error(traceback.format_exc())
             return False
 
-    async def buy_stock(self, ticker: str, company_name: str, current_price: float, scenario: Dict[str, Any], rank_change_msg: str = "", is_add: bool = False) -> bool:
+    async def buy_stock(
+        self,
+        ticker: str,
+        company_name: str,
+        current_price: float,
+        scenario: Dict[str, Any],
+        rank_change_msg: str = "",
+        is_add: bool = False,
+        persist: bool = True,
+    ) -> bool:
         """
         Process stock purchase
 
@@ -800,6 +867,8 @@ class StockTrackingAgent:
             rank_change_msg: Trading value ranking change info
             is_add: Pyramiding add (#288) — bypass the already-holding re-check and
                     insert an independent additional row instead of a first entry.
+            persist: When False, run all entry guards without changing the DB or
+                     message queue. Used before submitting the broker order.
 
         Returns:
             bool: Purchase success status
@@ -830,6 +899,9 @@ class StockTrackingAgent:
             if current_slots >= max_portfolio_size:
                 logger.warning(f"Reached market-based max portfolio size ({max_portfolio_size}). Current holdings: {current_slots}")
                 return False
+
+            if not persist:
+                return True
 
             # Current time
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -1736,6 +1808,13 @@ class StockTrackingAgent:
                 label = self._safe_account_log_label(account)
                 logger.info(f"Processing KR reports for account {label}")
 
+                if not await self._broker_tracking_state_matches(account):
+                    reason = f"Broker/tracking state mismatch for {label}"
+                    for state in analysis_states:
+                        state["should_save_watchlist"] = True
+                        state["skip_reason"] = state["skip_reason"] or reason
+                    continue
+
                 # 1. Update existing holdings and make sell decisions
                 sold_stocks = await self.update_holdings()
                 sell_count += len(sold_stocks)
@@ -1780,9 +1859,18 @@ class StockTrackingAgent:
                     logger.info(f"Buy score check: {company_name}({ticker}) - Score: {buy_score}")
 
                     if analysis_result.get("decision") == "Enter":
-                        buy_success = await self.buy_stock(ticker, company_name, current_price, scenario, rank_change_msg)
+                        eligible = await self.buy_stock(
+                            ticker,
+                            company_name,
+                            current_price,
+                            scenario,
+                            rank_change_msg,
+                            persist=False,
+                        )
+                        buy_success = False
+                        trade_result = None
 
-                        if buy_success:
+                        if eligible:
                             from trading.domestic_stock_trading import AsyncTradingContext
 
                             async with AsyncTradingContext(account_name=account["name"]) as trading:
@@ -1790,6 +1878,17 @@ class StockTrackingAgent:
 
                             if trade_result['success']:
                                 logger.info(f"Actual purchase successful: {trade_result['message']}")
+                                buy_success = await self.buy_stock(
+                                    ticker,
+                                    company_name,
+                                    current_price,
+                                    scenario,
+                                    rank_change_msg,
+                                )
+                                if not buy_success:
+                                    logger.critical(
+                                        f"{ticker} broker buy succeeded but tracking DB write failed"
+                                    )
                             else:
                                 logger.error(f"Actual purchase failed: {trade_result['message']}")
 
@@ -1800,7 +1899,7 @@ class StockTrackingAgent:
                                     f"{ticker} partial success: {len(successful)}/{len(successful) + len(failed)} accounts"
                                 )
 
-                            if ticker not in signaled_tickers:
+                            if buy_success and ticker not in signaled_tickers:
                                 try:
                                     from messaging.redis_signal_publisher import publish_buy_signal
 

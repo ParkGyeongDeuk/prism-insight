@@ -10,6 +10,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 import trading.domestic_stock_trading as domestic_trading
+from stock_tracking_enhanced_agent import EnhancedStockTrackingAgent
 from stock_tracking_agent import StockTrackingAgent
 
 
@@ -36,6 +37,14 @@ class _FakeAsyncTradingContext:
         return {
             "success": True,
             "message": f"sold for {self.account_name}",
+        }
+
+
+class _FailingAsyncTradingContext(_FakeAsyncTradingContext):
+    async def async_buy_stock(self, stock_code, limit_price=None):
+        return {
+            "success": False,
+            "message": "broker rejected order",
         }
 
 
@@ -111,8 +120,13 @@ async def test_process_reports_analyzes_once_and_dedupes_signals(monkeypatch, ca
         sector_checks.append((agent.active_account["name"], sector))
         return True
 
-    async def fake_buy_stock(ticker, company_name, current_price, scenario, rank_change_msg):
-        buy_calls.append((agent.active_account["name"], ticker))
+    async def fake_buy_stock(
+        ticker, company_name, current_price, scenario, rank_change_msg, persist=True
+    ):
+        buy_calls.append((agent.active_account["name"], ticker, persist))
+        return True
+
+    async def fake_broker_tracking_state_matches(account):
         return True
 
     agent._analyze_report_core = fake_core
@@ -121,6 +135,7 @@ async def test_process_reports_analyzes_once_and_dedupes_signals(monkeypatch, ca
     agent._get_current_slots_count = fake_get_current_slots_count
     agent._check_sector_diversity = fake_check_sector_diversity
     agent.buy_stock = fake_buy_stock
+    agent._broker_tracking_state_matches = fake_broker_tracking_state_matches
 
     monkeypatch.setattr(domestic_trading, "AsyncTradingContext", _FakeAsyncTradingContext)
     _install_signal_modules(monkeypatch, redis_calls, gcp_calls)
@@ -135,10 +150,140 @@ async def test_process_reports_analyzes_once_and_dedupes_signals(monkeypatch, ca
     assert holdings_checks == [("kr-primary", "005930"), ("kr-secondary", "005930")]
     assert slot_checks == ["kr-primary", "kr-secondary"]
     assert sector_checks == [("kr-primary", "Technology"), ("kr-secondary", "Technology")]
-    assert buy_calls == [("kr-primary", "005930"), ("kr-secondary", "005930")]
+    assert buy_calls == [
+        ("kr-primary", "005930", False),
+        ("kr-primary", "005930", True),
+        ("kr-secondary", "005930", False),
+        ("kr-secondary", "005930", True),
+    ]
     assert len(redis_calls) == 1
     assert len(gcp_calls) == 1
     assert "partial success" in caplog.text.lower()
+
+
+@pytest.mark.asyncio
+async def test_process_reports_does_not_persist_when_broker_buy_fails(monkeypatch):
+    agent = StockTrackingAgent.__new__(StockTrackingAgent)
+    agent.account_configs = [
+        {"name": "kr-primary", "account_key": "vps:kr-primary:01"},
+    ]
+    agent.active_account = None
+    agent.max_slots = 5
+    persist_calls = []
+    watchlist_calls = []
+
+    async def fake_core(_report_path):
+        return {
+            "success": True,
+            "ticker": "005930",
+            "company_name": "Samsung Electronics",
+            "current_price": 70000,
+            "scenario": {"buy_score": 8, "min_score": 7, "sector": "Technology"},
+            "decision": "Enter",
+            "sector": "Technology",
+            "rank_change_msg": "Up",
+        }
+
+    async def fake_true(*_args, **_kwargs):
+        return True
+
+    async def fake_zero_slots():
+        return 0
+
+    async def fake_no_sales():
+        return []
+
+    async def fake_buy_stock(
+        ticker, company_name, current_price, scenario, rank_change_msg, persist=True
+    ):
+        persist_calls.append(persist)
+        return True
+
+    async def fake_save_watchlist_item(**kwargs):
+        watchlist_calls.append(kwargs)
+        return True
+
+    agent._analyze_report_core = fake_core
+    agent._broker_tracking_state_matches = fake_true
+    agent.update_holdings = fake_no_sales
+
+    async def fake_not_holding(_ticker):
+        return False
+
+    agent._is_ticker_in_holdings = fake_not_holding
+    agent._get_current_slots_count = fake_zero_slots
+    agent._check_sector_diversity = fake_true
+    agent.buy_stock = fake_buy_stock
+    agent._save_watchlist_item = fake_save_watchlist_item
+
+    monkeypatch.setattr(domestic_trading, "AsyncTradingContext", _FailingAsyncTradingContext)
+
+    buy_count, sell_count = await StockTrackingAgent.process_reports(agent, ["report.pdf"])
+
+    assert (buy_count, sell_count) == (0, 0)
+    assert persist_calls == [False]
+    assert len(watchlist_calls) == 1
+    assert watchlist_calls[0]["was_traded"] is False
+
+
+@pytest.mark.asyncio
+async def test_enhanced_process_does_not_persist_when_broker_buy_fails(monkeypatch):
+    agent = EnhancedStockTrackingAgent.__new__(EnhancedStockTrackingAgent)
+    agent.active_account = {
+        "name": "kr-primary",
+        "account_key": "vps:kr-primary:01",
+    }
+    persist_calls = []
+
+    async def fake_true(*_args, **_kwargs):
+        return True
+
+    async def fake_no_sales():
+        return []
+
+    async def fake_analysis(_report_path):
+        return {
+            "success": True,
+            "ticker": "005930",
+            "company_name": "Samsung Electronics",
+            "current_price": 70000,
+            "scenario": {
+                "buy_score": 8,
+                "min_score": 7,
+                "sector": "Technology",
+                "rationale": "test",
+            },
+            "decision": "Enter",
+            "sector": "Technology",
+            "sector_diverse": True,
+            "rank_change_msg": "Up",
+        }
+
+    async def fake_buy_stock(
+        ticker,
+        company_name,
+        current_price,
+        scenario,
+        rank_change_msg,
+        is_add=False,
+        persist=True,
+    ):
+        persist_calls.append(persist)
+        return True
+
+    agent._broker_tracking_state_matches = fake_true
+    agent.update_holdings = fake_no_sales
+    agent.analyze_report = fake_analysis
+    agent.buy_stock = fake_buy_stock
+
+    monkeypatch.setattr(domestic_trading, "AsyncTradingContext", _FailingAsyncTradingContext)
+
+    buy_count, sell_count = await EnhancedStockTrackingAgent.process_reports(
+        agent, ["report.pdf"]
+    )
+
+    assert (buy_count, sell_count) == (0, 0)
+    assert persist_calls == [False]
 
 
 @pytest.mark.asyncio
@@ -199,6 +344,9 @@ async def test_process_reports_saves_watchlist_once_when_not_traded(monkeypatch)
         watchlist_calls.append(kwargs)
         return True
 
+    async def fake_broker_tracking_state_matches(account):
+        return True
+
     agent._analyze_report_core = fake_core
     agent.update_holdings = fake_update_holdings
     agent._is_ticker_in_holdings = fake_is_ticker_in_holdings
@@ -206,6 +354,7 @@ async def test_process_reports_saves_watchlist_once_when_not_traded(monkeypatch)
     agent._check_sector_diversity = fake_check_sector_diversity
     agent.buy_stock = fake_buy_stock
     agent._save_watchlist_item = fake_save_watchlist_item
+    agent._broker_tracking_state_matches = fake_broker_tracking_state_matches
 
     buy_count, sell_count = await StockTrackingAgent.process_reports(agent, ["report-a.pdf"])
 

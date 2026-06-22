@@ -373,6 +373,10 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
             buy_count = 0
             sell_count = 0
 
+            if not await self._broker_tracking_state_matches(self.active_account):
+                logger.error("Broker/tracking state mismatch - report processing blocked")
+                return 0, 0
+
             # 1. Update existing holdings and make sell decisions
             sold_stocks = await self.update_holdings()
             sell_count = len(sold_stocks)
@@ -529,50 +533,70 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
 
                 # Process buy if entry decision
                 if decision == "Enter" and buy_score >= min_score and sector_diverse:
-                    # Process buy (is_add => pyramiding additional independent row, #288)
-                    buy_success = await self.buy_stock(ticker, company_name, current_price, scenario, rank_change_msg, is_add=is_add)
+                    eligible = await self.buy_stock(
+                        ticker,
+                        company_name,
+                        current_price,
+                        scenario,
+                        rank_change_msg,
+                        is_add=is_add,
+                        persist=False,
+                    )
+                    buy_success = False
+                    trade_result = None
 
-                    if buy_success:
-                        # Call actual account trading function (async)
+                    if eligible:
                         from trading.domestic_stock_trading import AsyncTradingContext
                         async with AsyncTradingContext() as trading:
-                            # Execute async buy with limit price for reserved orders
                             trade_result = await trading.async_buy_stock(stock_code=ticker, limit_price=current_price)
 
                         if trade_result['success']:
                             logger.info(f"Actual purchase successful: {trade_result['message']}")
+                            buy_success = await self.buy_stock(
+                                ticker,
+                                company_name,
+                                current_price,
+                                scenario,
+                                rank_change_msg,
+                                is_add=is_add,
+                            )
+                            if not buy_success:
+                                logger.critical(
+                                    f"{ticker} broker buy succeeded but tracking DB write failed"
+                                )
                         else:
                             logger.error(f"Actual purchase failed: {trade_result['message']}")
 
-                        # [Optional] Publish buy signal via Redis Streams
-                        # Auto-skipped if Redis not configured (requires UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN)
-                        try:
-                            from messaging.redis_signal_publisher import publish_buy_signal
-                            await publish_buy_signal(
-                                ticker=ticker,
-                                company_name=company_name,
-                                price=current_price,
-                                scenario=scenario,
-                                source="AI Analysis",
-                                trade_result=trade_result
-                            )
-                        except Exception as signal_err:
-                            logger.warning(f"Buy signal publish failed (non-critical): {signal_err}")
+                        if buy_success:
+                            # [Optional] Publish buy signal via Redis Streams
+                            # Auto-skipped if Redis not configured (requires UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN)
+                            try:
+                                from messaging.redis_signal_publisher import publish_buy_signal
+                                await publish_buy_signal(
+                                    ticker=ticker,
+                                    company_name=company_name,
+                                    price=current_price,
+                                    scenario=scenario,
+                                    source="AI Analysis",
+                                    trade_result=trade_result
+                                )
+                            except Exception as signal_err:
+                                logger.warning(f"Buy signal publish failed (non-critical): {signal_err}")
 
-                        # [Optional] Publish buy signal via GCP Pub/Sub
-                        # Auto-skipped if GCP not configured (requires GCP_PROJECT_ID, GCP_PUBSUB_TOPIC_ID)
-                        try:
-                            from messaging.gcp_pubsub_signal_publisher import publish_buy_signal as gcp_publish_buy_signal
-                            await gcp_publish_buy_signal(
-                                ticker=ticker,
-                                company_name=company_name,
-                                price=current_price,
-                                scenario=scenario,
-                                source="AI Analysis",
-                                trade_result=trade_result
-                            )
-                        except Exception as signal_err:
-                            logger.warning(f"GCP buy signal publish failed (non-critical): {signal_err}")
+                            # [Optional] Publish buy signal via GCP Pub/Sub
+                            # Auto-skipped if GCP not configured (requires GCP_PROJECT_ID, GCP_PUBSUB_TOPIC_ID)
+                            try:
+                                from messaging.gcp_pubsub_signal_publisher import publish_buy_signal as gcp_publish_buy_signal
+                                await gcp_publish_buy_signal(
+                                    ticker=ticker,
+                                    company_name=company_name,
+                                    price=current_price,
+                                    scenario=scenario,
+                                    source="AI Analysis",
+                                    trade_result=trade_result
+                                )
+                            except Exception as signal_err:
+                                logger.warning(f"GCP buy signal publish failed (non-critical): {signal_err}")
 
                     if buy_success:
                         buy_count += 1
@@ -588,7 +612,16 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
             logger.error(traceback.format_exc())
             return 0, 0
 
-    async def buy_stock(self, ticker: str, company_name: str, current_price: float, scenario: Dict[str, Any], rank_change_msg: str = "", is_add: bool = False) -> bool:
+    async def buy_stock(
+        self,
+        ticker: str,
+        company_name: str,
+        current_price: float,
+        scenario: Dict[str, Any],
+        rank_change_msg: str = "",
+        is_add: bool = False,
+        persist: bool = True,
+    ) -> bool:
         """
         Stock buy processing (override parent class method)
 
@@ -607,7 +640,15 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
                 logger.info(f"{ticker} Dynamic stop-loss calculated: {stop_loss:,.0f} KRW")
 
             # Call parent class's buy_stock method
-            return await super().buy_stock(ticker, company_name, current_price, scenario, rank_change_msg, is_add=is_add)
+            return await super().buy_stock(
+                ticker,
+                company_name,
+                current_price,
+                scenario,
+                rank_change_msg,
+                is_add=is_add,
+                persist=persist,
+            )
 
         except Exception as e:
             logger.error(f"{ticker} Error during purchase processing: {str(e)}")
