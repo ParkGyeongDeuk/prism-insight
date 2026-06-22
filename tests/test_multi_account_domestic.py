@@ -231,6 +231,96 @@ def test_domestic_request_serializes_activation_and_fetch(monkeypatch):
     ]
 
 
+class _FakeKISResponse:
+    def __init__(self, body):
+        self._body = body
+
+    def isOK(self):
+        return True
+
+    def getBody(self):
+        return self._body
+
+
+def test_demo_revisable_orders_use_supported_daily_inquiry(monkeypatch):
+    trader = dst.DomesticStockTrading.__new__(dst.DomesticStockTrading)
+    trader.mode = "demo"
+    trader.trenv = SimpleNamespace(my_acct="12345678", my_prod="01")
+    calls = []
+
+    def fake_request(api_url, tr_id, params, **kwargs):
+        calls.append((api_url, tr_id, params, kwargs))
+        return _FakeKISResponse(
+            SimpleNamespace(
+                output1=[
+                    {
+                        "odno": "1001",
+                        "orgn_odno": "0000000000",
+                        "pdno": "005930",
+                        "ord_qty": "2",
+                        "ord_unpr": "70000",
+                        "tot_ccld_qty": "1",
+                        "rmn_qty": "1",
+                        "sll_buy_dvsn_cd": "02",
+                        "ord_dvsn_cd": "00",
+                        "ord_gno_brno": "12345",
+                    }
+                ]
+            )
+        )
+
+    monkeypatch.setattr(trader, "_request", fake_request)
+    monkeypatch.setattr(dst, "_now_kst", lambda: dst.datetime.datetime(2026, 6, 22, 10, 0, tzinfo=dst.KST))
+
+    orders = trader.get_revisable_orders("005930")
+
+    assert calls[0][0] == "/uapi/domestic-stock/v1/trading/inquire-daily-ccld"
+    assert calls[0][1] == "VTTC0081R"
+    assert calls[0][2]["CCLD_DVSN"] == "02"
+    assert calls[0][2]["INQR_STRT_DT"] == "20260622"
+    assert orders == [
+        {
+            "order_no": "1001",
+            "orgn_odno": "1001",
+            "stock_code": "005930",
+            "ord_qty": 2,
+            "ord_unpr": 70000,
+            "tot_ccld_qty": 1,
+            "psbl_qty": 1,
+            "sll_buy_dvsn_cd": "02",
+            "ord_dvsn": "00",
+            "krx_fwdg_ord_orgno": "12345",
+        }
+    ]
+
+
+def test_limit_buy_preserves_cancel_identifiers(monkeypatch):
+    trader = dst.DomesticStockTrading.__new__(dst.DomesticStockTrading)
+    trader.mode = "demo"
+    trader.auto_trading = True
+    trader.buy_amount = 100000
+    trader.trenv = SimpleNamespace(my_acct="12345678", my_prod="01")
+
+    monkeypatch.setattr(
+        trader,
+        "_request",
+        lambda *args, **kwargs: _FakeKISResponse(
+            SimpleNamespace(
+                output={
+                    "ODNO": "2002",
+                    "KRX_FWDG_ORD_ORGNO": "54321",
+                }
+            )
+        ),
+    )
+
+    result = trader.buy_limit_price("005930", limit_price=50000, buy_amount=50000)
+
+    assert result["success"] is True
+    assert result["order_no"] == "2002"
+    assert result["krx_fwdg_ord_orgno"] == "54321"
+
+
 def test_domestic_trader_uses_account_buy_amount_override(monkeypatch):
     account = {
         "name": "kr-override",

@@ -523,13 +523,18 @@ class DomesticStockTrading:
 
             if res.isOK():
                 output = res.getBody().output
-                order_no = output.get('odno', '')
+                order_no = output.get('odno') or output.get('ODNO', '')
+                krx_fwdg_ord_orgno = (
+                    output.get('krx_fwdg_ord_orgno')
+                    or output.get('KRX_FWDG_ORD_ORGNO', '')
+                )
 
                 logger.info(f"[{stock_code}] Limit buy order successful: {buy_quantity} shares x {limit_price:,} KRW, order no: {order_no}")
 
                 return {
                     'success': True,
                     'order_no': order_no,
+                    'krx_fwdg_ord_orgno': krx_fwdg_ord_orgno,
                     'stock_code': stock_code,
                     'quantity': buy_quantity,
                     'limit_price': limit_price,
@@ -1821,32 +1826,51 @@ class DomesticStockTrading:
     def get_revisable_orders(self, stock_code: str = None) -> List[Dict[str, Any]]:
         """Inquire revisable/cancellable (= still-open / unfilled) orders.
 
-        TR: 주식정정취소가능주문조회 — real TTTC0084R. Returns a normalised list of
-        open orders, optionally filtered to ``stock_code``. Returns [] on any
-        failure (degrade to no-op — Loop C must treat empty as "nothing to chase",
-        never as "everything filled").
+        Real trading uses TTTC0084R (revisable-order inquiry). KIS does not
+        expose a paper equivalent, so demo trading uses VTTC0081R (daily order
+        inquiry) filtered to unfilled orders. Returns a normalised list of open
+        orders, optionally filtered to ``stock_code``. Returns [] on any failure
+        (degrade to no-op — Loop C must treat empty as "nothing to chase", never
+        as "everything filled").
 
         Each dict: {order_no, orgn_odno, stock_code, ord_qty, ord_unpr,
                     tot_ccld_qty, psbl_qty, sll_buy_dvsn_cd, ord_dvsn,
                     krx_fwdg_ord_orgno}.
         """
-        api_url = "/uapi/domestic-stock/v1/trading/inquire-psbl-rvsecncl"
-
-        # TODO(live-validate): paper tr_id VTTC0084R is UNVERIFIED in the KIS
-        # sample repo. Real TTTC0084R confirmed. Loop C runs SHADOW by default.
         if self.mode == "real":
+            api_url = "/uapi/domestic-stock/v1/trading/inquire-psbl-rvsecncl"
             tr_id = "TTTC0084R"
+            params = {
+                "CANO": self.trenv.my_acct,
+                "ACNT_PRDT_CD": self.trenv.my_prod,
+                "INQR_DVSN_1": "1",
+                "INQR_DVSN_2": "0",
+                "CTX_AREA_FK100": "",
+                "CTX_AREA_NK100": "",
+            }
+            output_field = "output"
         else:
-            tr_id = "VTTC0084R"
-
-        params = {
-            "CANO": self.trenv.my_acct,
-            "ACNT_PRDT_CD": self.trenv.my_prod,
-            "INQR_DVSN_1": "1",
-            "INQR_DVSN_2": "0",
-            "CTX_AREA_FK100": "",
-            "CTX_AREA_NK100": "",
-        }
+            api_url = "/uapi/domestic-stock/v1/trading/inquire-daily-ccld"
+            tr_id = "VTTC0081R"
+            today = _now_kst().strftime("%Y%m%d")
+            params = {
+                "CANO": self.trenv.my_acct,
+                "ACNT_PRDT_CD": self.trenv.my_prod,
+                "INQR_STRT_DT": today,
+                "INQR_END_DT": today,
+                "SLL_BUY_DVSN_CD": "00",
+                "PDNO": stock_code or "",
+                "CCLD_DVSN": "02",
+                "INQR_DVSN": "00",
+                "INQR_DVSN_3": "00",
+                "ORD_GNO_BRNO": "",
+                "ODNO": "",
+                "INQR_DVSN_1": "",
+                "CTX_AREA_FK100": "",
+                "CTX_AREA_NK100": "",
+                "EXCG_ID_DVSN_CD": "KRX",
+            }
+            output_field = "output1"
 
         out: List[Dict[str, Any]] = []
         try:
@@ -1856,7 +1880,7 @@ class DomesticStockTrading:
                 logger.warning(f"Revisable-order inquiry failed: {error_msg}")
                 return out
 
-            output1 = res.getBody().output
+            output1 = getattr(res.getBody(), output_field, [])
             if not isinstance(output1, list):
                 output1 = [output1] if output1 else []
 
@@ -1864,17 +1888,28 @@ class DomesticStockTrading:
                 code = str(row.get('pdno', '') or '').strip()
                 if stock_code and code != stock_code:
                     continue
+                remaining_qty = row.get('psbl_qty')
+                if remaining_qty is None:
+                    remaining_qty = row.get('rmn_qty')
+                order_no = str(row.get('odno', '') or '').strip()
+                original_order_no = str(row.get('orgn_odno', '') or '').strip()
+                if not original_order_no or not original_order_no.strip('0'):
+                    original_order_no = order_no
                 out.append({
-                    'order_no': row.get('odno', ''),
-                    'orgn_odno': row.get('orgn_odno', ''),
+                    'order_no': order_no,
+                    'orgn_odno': original_order_no,
                     'stock_code': code,
                     'ord_qty': _safe_int(row.get('ord_qty')),
                     'ord_unpr': _safe_int(row.get('ord_unpr')),
                     'tot_ccld_qty': _safe_int(row.get('tot_ccld_qty')),
-                    'psbl_qty': _safe_int(row.get('psbl_qty')),  # cancellable/amendable qty
+                    'psbl_qty': _safe_int(remaining_qty),
                     'sll_buy_dvsn_cd': row.get('sll_buy_dvsn_cd', ''),  # 01 sell / 02 buy
                     'ord_dvsn': row.get('ord_dvsn_cd', ''),
-                    'krx_fwdg_ord_orgno': row.get('ord_gno_brno', ''),
+                    'krx_fwdg_ord_orgno': (
+                        row.get('krx_fwdg_ord_orgno')
+                        or row.get('KRX_FWDG_ORD_ORGNO')
+                        or row.get('ord_gno_brno', '')
+                    ),
                 })
             return out
 
