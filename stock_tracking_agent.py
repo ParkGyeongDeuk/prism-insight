@@ -121,7 +121,7 @@ class StockTrackingAgent:
             telegram_token: Telegram bot token
             enable_journal: Enable trading journal feature (default: False, reads from ENABLE_TRADING_JOURNAL env)
         """
-        self.max_slots = self.MAX_SLOTS
+        self.max_slots = self._resolve_max_slots()
         self.message_queue = []  # For storing Telegram messages
         self._msg_types = []  # msg_type for each message in queue
         self._broadcast_task = None  # Track broadcast translation task
@@ -145,6 +145,28 @@ class StockTrackingAgent:
         self.telegram_bot = None
         if self.telegram_token:
             self.telegram_bot = Bot(token=self.telegram_token)
+
+    @classmethod
+    def _resolve_max_slots(cls) -> int:
+        """Return a local slot limit without allowing the upstream cap to grow."""
+        raw_value = os.getenv("PRISM_KR_MAX_SLOTS")
+        if raw_value is None:
+            return cls.MAX_SLOTS
+
+        try:
+            max_slots = int(raw_value.strip())
+        except (AttributeError, TypeError, ValueError):
+            max_slots = 0
+
+        if 1 <= max_slots <= cls.MAX_SLOTS:
+            return max_slots
+
+        logger.warning(
+            "Invalid PRISM_KR_MAX_SLOTS=%r; using default %d",
+            raw_value,
+            cls.MAX_SLOTS,
+        )
+        return cls.MAX_SLOTS
 
     async def initialize(self, language: str = "ko", sector_names: list = None,
                          skip_llm_agent: bool = False):
