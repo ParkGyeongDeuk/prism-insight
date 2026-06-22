@@ -122,6 +122,11 @@ class StockTrackingAgent:
             enable_journal: Enable trading journal feature (default: False, reads from ENABLE_TRADING_JOURNAL env)
         """
         self.max_slots = self._resolve_max_slots()
+        self.total_budget_krw = self._resolve_budget_amount("PRISM_KR_TOTAL_BUDGET")
+        self.cash_reserve_krw = self._resolve_budget_amount("PRISM_KR_CASH_RESERVE")
+        if self.cash_reserve_krw > self.total_budget_krw:
+            raise ValueError("PRISM_KR_CASH_RESERVE cannot exceed PRISM_KR_TOTAL_BUDGET")
+        self.investable_budget_krw = self.total_budget_krw - self.cash_reserve_krw
         self.message_queue = []  # For storing Telegram messages
         self._msg_types = []  # msg_type for each message in queue
         self._broadcast_task = None  # Track broadcast translation task
@@ -167,6 +172,48 @@ class StockTrackingAgent:
             cls.MAX_SLOTS,
         )
         return cls.MAX_SLOTS
+
+    @staticmethod
+    def _resolve_budget_amount(name: str) -> int:
+        """Parse an optional non-negative KRW budget, failing closed on bad input."""
+        raw_value = os.getenv(name)
+        if raw_value is None:
+            return 0
+
+        try:
+            amount = int(raw_value.strip())
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise ValueError(f"{name} must be a non-negative integer") from exc
+
+        if amount < 0:
+            raise ValueError(f"{name} must be a non-negative integer")
+        return amount
+
+    def _has_budget_for_next_slot(self, current_slots: int) -> bool:
+        """Conservatively reserve one configured unit amount per tracking row."""
+        investable_budget = getattr(self, "investable_budget_krw", 0)
+        if investable_budget <= 0:
+            return True
+
+        account = getattr(self, "active_account", None) or {}
+        try:
+            buy_amount = int(account.get("buy_amount_krw") or 0)
+        except (TypeError, ValueError):
+            buy_amount = 0
+
+        if buy_amount <= 0:
+            logger.error("Cannot enforce KR budget: active account buy_amount_krw is missing")
+            return False
+
+        next_allocated_amount = (current_slots + 1) * buy_amount
+        if next_allocated_amount > investable_budget:
+            logger.warning(
+                "KR investable budget exceeded: next allocation %s KRW > limit %s KRW",
+                f"{next_allocated_amount:,}",
+                f"{investable_budget:,}",
+            )
+            return False
+        return True
 
     async def initialize(self, language: str = "ko", sector_names: list = None,
                          skip_llm_agent: bool = False):
@@ -767,6 +814,9 @@ class StockTrackingAgent:
             current_slots = await self._get_current_slots_count()
             if current_slots >= self.max_slots:
                 logger.warning(f"Holdings already at maximum ({self.max_slots})")
+                return False
+
+            if not self._has_budget_for_next_slot(current_slots):
                 return False
 
             # Check market-based maximum portfolio size

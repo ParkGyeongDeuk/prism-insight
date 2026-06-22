@@ -5,6 +5,8 @@ services:
       - PRISM_OPENAI_AUTH_MODE=${PRISM_OPENAI_AUTH_MODE:-chatgpt_oauth}
       - PRISM_OAUTH_CALLBACK_HOST=${PRISM_OAUTH_CALLBACK_HOST:-0.0.0.0}
       - PRISM_KR_MAX_SLOTS=${PRISM_KR_MAX_SLOTS:-5}
+      - PRISM_KR_TOTAL_BUDGET=${PRISM_KR_TOTAL_BUDGET:-2000000}
+      - PRISM_KR_CASH_RESERVE=${PRISM_KR_CASH_RESERVE:-400000}
       - PATH=/root/.local/bin:/app/venv/bin:/root/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
     volumes:
