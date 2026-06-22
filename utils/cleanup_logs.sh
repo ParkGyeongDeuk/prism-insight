@@ -7,6 +7,7 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"  # utils의 부모 디렉토리
 # 보관 기간 설정
 DAYS_TO_KEEP_LOGS=7      # 로그 파일: 7일
 DAYS_TO_KEEP_REPORTS=30  # PDF/MD 보고서: 30일
+DAYS_TO_KEEP_TEMP=1      # 임시 파일: 1일
 
 # utils 디렉토리 생성 (없는 경우)
 mkdir -p "$PROJECT_ROOT/utils"
@@ -24,6 +25,7 @@ LOG_PATTERNS=(
     "trigger_results_afternoon_*.json"
     "*stock_tracking_*.log"
     "orchestrator_*.log"
+    "performance_tracker_*.log"
     # 미국 주식
     "us_orchestrator_*.log"
     "trigger_results_us_*.json"
@@ -65,10 +67,31 @@ fi
 # 3. logs 디렉토리 내의 누적 로그파일 처리 (일요일에 내용 비우기)
 # =============================================================================
 LOGS_DIR="$PROJECT_ROOT/logs"
+if [ -d "$LOGS_DIR" ]; then
+    find "$LOGS_DIR" -name "*.log" -type f -mtime +$DAYS_TO_KEEP_LOGS -delete
+fi
+
 if [ -d "$LOGS_DIR" ] && [ $(date +%u) -eq 7 ]; then
     LOG_ACCUMULATING_PATTERN="stock_analysis_*.log"
     find "$LOGS_DIR" -name "$LOG_ACCUMULATING_PATTERN" -type f -exec sh -c '> {}' \;
     echo "$(date): logs 디렉토리의 누적 로그파일 내용을 비웠습니다." >> "$PROJECT_ROOT/utils/log_cleanup.log"
+fi
+
+# 한국 주식 Markdown 보고서
+KR_REPORTS_DIR="$PROJECT_ROOT/reports"
+if [ -d "$KR_REPORTS_DIR" ]; then
+    find "$KR_REPORTS_DIR" -name "*.md" -type f -mtime +$DAYS_TO_KEEP_REPORTS -delete
+fi
+
+# 변환 HTML 및 차트 이미지
+KR_HTML_DIR="$PROJECT_ROOT/html_reports"
+if [ -d "$KR_HTML_DIR" ]; then
+    find "$KR_HTML_DIR" -name "*.html" -type f -mtime +$DAYS_TO_KEEP_REPORTS -delete
+fi
+
+KR_CHARTS_DIR="$PROJECT_ROOT/charts"
+if [ -d "$KR_CHARTS_DIR" ]; then
+    find "$KR_CHARTS_DIR" -type f \( -name "*.png" -o -name "*.jpg" -o -name "*.jpeg" -o -name "*.svg" \) -mtime +$DAYS_TO_KEEP_REPORTS -delete
 fi
 
 # =============================================================================
@@ -116,6 +139,13 @@ fi
 US_TELEGRAM_DIR="$PRISM_US_DIR/telegram_messages"
 if [ -d "$US_TELEGRAM_DIR" ]; then
     find "$US_TELEGRAM_DIR" -type f -mtime +$DAYS_TO_KEEP_REPORTS -exec rm {} \;
+fi
+
+# 프로젝트 임시 파일
+TEMP_DIR="$PROJECT_ROOT/tmp"
+if [ -d "$TEMP_DIR" ]; then
+    find "$TEMP_DIR" -type f -mtime +$DAYS_TO_KEEP_TEMP -delete
+    find "$TEMP_DIR" -mindepth 1 -type d -empty -delete
 fi
 
 # =============================================================================
