@@ -231,6 +231,34 @@ Perplexity key는 사용자가 발급 및 설정했다. `.env`와 필요한 secr
   - `StockTrackingAgent._resolve_max_slots()` 결과는 `5`
   - feature status는 OAuth `LIVE`, Loop A `OFF`, Loop B/C `미스케줄`, vision 계열 `OFF`
 
+## Loop A/B/C SHADOW 관측 운영
+
+원본 v2.15.0의 Loop A/B/C는 기본 SHADOW이므로, 국내 모의투자에서 먼저 관측 데이터를 쌓기로 했다.
+
+적용 기준:
+
+- 대상은 KR 모의투자 계좌만으로 제한한다. US loop는 로컬 운영 범위 밖이므로 cron에 올리지 않는다.
+- `LOOP_A_LIVE`, `LOOP_B_LIVE`, `LOOP_C_LIVE`는 설정하지 않는다.
+- 실제 주문, 정정, 취소, 매매 판단 변경 없이 "would" 로그와 loop table 기록만 관찰한다.
+- KIS 조회 부하와 기존 09:30/15:40 배치와의 겹침을 줄이기 위해 원본 예시보다 보수적인 staggered 주기로 실행한다.
+
+현재 `docker/crontab.kd`의 SHADOW 관측 스케줄:
+
+- Loop C 미체결 추격 관측: 평일 09~15시, `3-53/10`분
+- Loop A 고빈도 하드스톱 관측: 평일 09~15시, `5-55/10`분
+- Loop B 추세이탈 관측: 평일 09~15시, `7-52/15`분
+- Loop B 종가 확인 관측: 평일 15:10~15:20, 5분 간격, `LOOP_B_CLOSE_WINDOW=true`
+
+관찰할 로그:
+
+```bash
+tail -200 logs/loop_a_shadow_$(date +%Y%m%d).log
+tail -200 logs/loop_b_shadow_$(date +%Y%m%d).log
+tail -200 logs/loop_c_shadow_$(date +%Y%m%d).log
+```
+
+LIVE 전환은 자동으로 하지 않는다. 최소 첫 보유 종목 발생 후 며칠간 SHADOW 로그를 보고, KIS/DB/Telegram 정합성 확인이 끝난 뒤 Loop A부터 별도로 판단한다. Loop B는 휩쏘 검증이 필요하므로 더 긴 관찰 기간을 둔다. Loop C는 정정/취소 TR 검증 부담이 가장 크므로 가장 마지막에 검토한다.
+
 ## 앞으로 꼭 관찰해야 할 항목
 
 다음 항목은 아직 장기간 검증이 끝난 것이 아니므로, 새 context에서 작업을 이어갈 때 우선 확인한다.

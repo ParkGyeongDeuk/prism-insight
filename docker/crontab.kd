@@ -16,5 +16,11 @@ PYTHONPATH=/app/prism-insight
 30 9 * * 1-5 cd /app/prism-insight && set -a && . /app/prism-insight/.env && set +a && python3 stock_analysis_orchestrator.py --mode morning >> /app/prism-insight/logs/kr_morning_$(date +\%Y\%m\%d).log 2>&1
 40 15 * * 1-5 cd /app/prism-insight && set -a && . /app/prism-insight/.env && set +a && python3 stock_analysis_orchestrator.py --mode afternoon >> /app/prism-insight/logs/kr_afternoon_$(date +\%Y\%m\%d).log 2>&1
 
+# KR real-time loop observation (SHADOW only; do not set LOOP_A/B/C_LIVE=true).
+3-53/10 9-15 * * 1-5 cd /app/prism-insight && set -a && . /app/prism-insight/.env && set +a && python3 tools/loop_c_fill_chaser.py --market kr >> /app/prism-insight/logs/loop_c_shadow_$(date +\%Y\%m\%d).log 2>&1
+5-55/10 9-15 * * 1-5 cd /app/prism-insight && set -a && . /app/prism-insight/.env && set +a && python3 tools/loop_a_hardstop.py --market kr >> /app/prism-insight/logs/loop_a_shadow_$(date +\%Y\%m\%d).log 2>&1
+7-52/15 9-15 * * 1-5 cd /app/prism-insight && set -a && . /app/prism-insight/.env && set +a && python3 tools/loop_b_trend_exit.py --market kr >> /app/prism-insight/logs/loop_b_shadow_$(date +\%Y\%m\%d).log 2>&1
+10-20/5 15 * * 1-5 cd /app/prism-insight && set -a && . /app/prism-insight/.env && set +a && LOOP_B_CLOSE_WINDOW=true python3 tools/loop_b_trend_exit.py --market kr >> /app/prism-insight/logs/loop_b_shadow_$(date +\%Y\%m\%d).log 2>&1
+
 # Track 7/14/30-day performance after the market closes (Monday-Friday).
 0 17 * * 1-5 cd /app/prism-insight && set -a && . /app/prism-insight/.env && set +a && python3 performance_tracker_batch.py >> /app/prism-insight/logs/performance_$(date +\%Y\%m\%d).log 2>&1
