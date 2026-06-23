@@ -201,6 +201,20 @@ Perplexity key는 사용자가 발급 및 설정했다. `.env`와 필요한 secr
 - 조치: `docker/crontab.kd`의 각 job이 `.env`를 로드하도록 수정하고 현재 컨테이너 crontab에도 재설치했다.
 - 기대 결과: 다음 포트폴리오 메시지는 `0/5개` 기준이어야 한다.
 
+## 2026-06-23 v2.15.0 병합 기준
+
+`main` v2.15.0을 `kd-local`에 병합할 때의 로컬 운영 원칙:
+
+- `cores/llm/openai_responses_llm.py` 충돌은 원본 v2.15.0의 stateless multi-turn 방식으로 해결한다.
+  - ChatGPT OAuth/Codex 경로에서는 `previous_response_id`가 strip되므로, 매 턴 `function_call`과 `function_call_output`을 누적 input으로 재전송하는 방식이 기준이다.
+- `tools/feature_status.py`, OAuth quota monitor, 비전 관련 신규 파일은 받아도 된다.
+- 단, 로컬 국내 모의투자 운영에서는 별도 승인 전까지 다음 기능을 cron/env로 활성화하지 않는다.
+  - Loop A/B/C live mode: `LOOP_A_LIVE=true`, `LOOP_B_LIVE=true`, `LOOP_C_LIVE=true`
+  - 비전 분석: `PRISM_FEATURE_VISION=on`
+  - 비전 매수품질 live 영향: `PRISM_VISION_SHADOW=false`
+- `docker/crontab.kd`에는 기존 국내 배치, cleanup, compression, performance tracker만 유지한다.
+- v2.15.0 병합 후에는 `tools/feature_status.py`로 실제 런타임 상태를 확인하되, Loop/vision이 OFF 또는 미스케줄/SHADOW인 상태를 정상으로 본다.
+
 ## 앞으로 꼭 관찰해야 할 항목
 
 다음 항목은 아직 장기간 검증이 끝난 것이 아니므로, 새 context에서 작업을 이어갈 때 우선 확인한다.
