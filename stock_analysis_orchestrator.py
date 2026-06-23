@@ -538,18 +538,18 @@ class StockAnalysisOrchestrator:
 
         return pdf_paths
 
-    async def generate_telegram_messages(self, report_pdf_paths, language: str = "ko"):
+    async def generate_telegram_messages(self, report_paths, language: str = "ko"):
         """
         Generate telegram messages
 
         Args:
-            report_pdf_paths (list): List of report file (pdf) paths
+            report_paths (list): List of markdown report file paths
             language (str): Message language ("ko" or "en")
 
         Returns:
             list: List of generated telegram message file paths
         """
-        logger.info(f"Starting telegram message generation for {len(report_pdf_paths)} reports (language: {language})")
+        logger.info(f"Starting telegram message generation for {len(report_paths)} reports (language: {language})")
 
         # Import telegram summary generator module
         from telegram_summary_agent import TelegramSummaryGenerator
@@ -558,13 +558,13 @@ class StockAnalysisOrchestrator:
         generator = TelegramSummaryGenerator()
 
         message_paths = []
-        for report_pdf_path in report_pdf_paths:
+        for report_path in report_paths:
             try:
                 # Generate telegram message
-                await generator.process_report(str(report_pdf_path), str(TELEGRAM_MSGS_DIR), to_lang=language)
+                await generator.process_report(str(report_path), str(TELEGRAM_MSGS_DIR), to_lang=language)
 
                 # Estimate generated message file path
-                report_file = Path(report_pdf_path)
+                report_file = Path(report_path)
                 ticker = report_file.stem.split('_')[0]
                 company_name = report_file.stem.split('_')[1]
 
@@ -577,7 +577,7 @@ class StockAnalysisOrchestrator:
                     logger.warning(f"Telegram message file not found at expected path: {message_path}")
 
             except Exception as e:
-                logger.error(f"Error during telegram message generation for {report_pdf_path}: {str(e)}")
+                logger.error(f"Error during telegram message generation for {report_path}: {str(e)}")
 
         return message_paths
 
@@ -1109,7 +1109,7 @@ class StockAnalysisOrchestrator:
                 logger.info("Telegram enabled - proceeding with message generation and transmission steps")
 
                 # 4. Generate telegram messages
-                message_paths = await self.generate_telegram_messages(pdf_paths, language)
+                message_paths = await self.generate_telegram_messages(report_paths, language)
 
                 # 5. Send telegram messages and PDFs
                 await self.send_telegram_messages(message_paths, pdf_paths, report_paths)
@@ -1117,7 +1117,7 @@ class StockAnalysisOrchestrator:
                 logger.info("Telegram disabled - skipping message generation and transmission steps")
 
             # 6. Tracking system batch (runs concurrently with broadcast I/O tasks via async)
-            if pdf_paths:
+            if report_paths:
                 try:
                     logger.info("Starting stock tracking system batch execution")
 
@@ -1157,7 +1157,7 @@ class StockAnalysisOrchestrator:
                             kr_sector_names = sorted(set(macro_context["sector_map"].values()))
 
                         tracking_success = await tracking_agent.run(
-                            pdf_paths, chat_id, language, self.telegram_config,
+                            report_paths, chat_id, language, self.telegram_config,
                             trigger_results_file=trigger_results_file,
                             sector_names=kr_sector_names
                         )

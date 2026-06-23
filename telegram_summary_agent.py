@@ -380,12 +380,12 @@ class TelegramSummaryGenerator:
             logger.error(f"Failed to save Telegram message: {e}")
             raise
 
-    async def process_report(self, report_pdf_path, output_dir="telegram_messages", from_lang="ko", to_lang="ko"):
+    async def process_report(self, report_path, output_dir="telegram_messages", from_lang="ko", to_lang="ko"):
         """
         Process report file to generate Telegram summary message
 
         Args:
-            report_pdf_path: Report file path
+            report_path: Report file path
             output_dir: Output directory
             from_lang: Report source language (default: "ko")
             to_lang: Summary target language (default: "ko")
@@ -395,14 +395,14 @@ class TelegramSummaryGenerator:
             os.makedirs(output_dir, exist_ok=True)
 
             # Extract metadata from filename
-            filename = os.path.basename(report_pdf_path)
+            filename = os.path.basename(report_path)
             metadata = self.extract_metadata_from_filename(filename)
 
             logger.info(f"Processing: {filename} - {metadata['stock_name']}({metadata['stock_code']})")
 
             # Read report content
-            from pdf_converter import pdf_to_markdown_text
-            report_content = pdf_to_markdown_text(report_pdf_path)
+            from cores.report_reader import read_report_text_for_llm
+            report_content = read_report_text_for_llm(report_path)
 
             # Determine trigger type and mode
             trigger_type, trigger_mode = self.determine_trigger_type(

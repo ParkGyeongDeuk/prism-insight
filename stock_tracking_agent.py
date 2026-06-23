@@ -49,6 +49,7 @@ from cores.llm.openai_responses_llm import OpenAIResponsesLLM as OpenAIAugmented
 # Core agent imports
 from cores.openai_error_logging import log_openai_error
 from cores.agents.trading_agents import create_trading_scenario_agent
+from cores.report_reader import read_report_text_for_llm
 from cores.utils import parse_llm_json
 
 # O'Neil 룰베이스 매도 (2026-06-04 US quota 사고 동일 룰 결함 KR에도 적용).
@@ -578,7 +579,7 @@ class StockTrackingAgent:
         """Return default trading scenario (delegates to tracking.helpers)"""
         return default_scenario()
 
-    async def _analyze_report_core(self, pdf_report_path: str) -> Dict[str, Any]:
+    async def _analyze_report_core(self, report_path: str) -> Dict[str, Any]:
         """Analyze a report once before per-account execution checks.
 
         Note:
@@ -589,11 +590,11 @@ class StockTrackingAgent:
             This keeps LLM cost flat instead of multiplying per account.
         """
         try:
-            logger.info(f"Starting report analysis: {pdf_report_path}")
+            logger.info(f"Starting report analysis: {report_path}")
 
-            ticker, company_name = await self._extract_ticker_info(pdf_report_path)
+            ticker, company_name = await self._extract_ticker_info(report_path)
             if not ticker or not company_name:
-                logger.error(f"Failed to extract ticker info: {pdf_report_path}")
+                logger.error(f"Failed to extract ticker info: {report_path}")
                 return {"success": False, "error": "Failed to extract ticker info"}
 
             current_price = await self._get_current_stock_price(ticker)
@@ -603,9 +604,7 @@ class StockTrackingAgent:
 
             rank_change_percentage, rank_change_msg = await self._get_trading_value_rank_change(ticker)
 
-            from pdf_converter import pdf_to_markdown_text
-
-            report_content = pdf_to_markdown_text(pdf_report_path)
+            report_content = read_report_text_for_llm(report_path)
             trigger_info = getattr(self, 'trigger_info_map', {}).get(ticker, {})
             trigger_type = trigger_info.get('trigger_type', '')
             trigger_mode = trigger_info.get('trigger_mode', '')
@@ -640,17 +639,17 @@ class StockTrackingAgent:
             logger.error(traceback.format_exc())
             return {"success": False, "error": str(e)}
 
-    async def analyze_report(self, pdf_report_path: str) -> Dict[str, Any]:
+    async def analyze_report(self, report_path: str) -> Dict[str, Any]:
         """
         Analyze stock analysis report and make trading decision
 
         Args:
-            pdf_report_path: PDF analysis report file path
+            report_path: Analysis report file path
 
         Returns:
             Dict: Trading decision result
         """
-        analysis_result = await self._analyze_report_core(pdf_report_path)
+        analysis_result = await self._analyze_report_core(report_path)
         if not analysis_result.get("success", False):
             return analysis_result
 
@@ -1764,18 +1763,18 @@ class StockTrackingAgent:
             error_msg = f"Error occurred while generating report: {str(e)}"
             return error_msg
 
-    async def process_reports(self, pdf_report_paths: List[str]) -> Tuple[int, int]:
+    async def process_reports(self, report_paths: List[str]) -> Tuple[int, int]:
         """
         Process analysis reports and make buy/sell decisions
 
         Args:
-            pdf_report_paths: List of pdf analysis report file paths
+            report_paths: List of analysis report file paths
 
         Returns:
             Tuple[int, int]: Buy count, sell count
         """
         try:
-            logger.info(f"Starting processing of {len(pdf_report_paths)} reports")
+            logger.info(f"Starting processing of {len(report_paths)} reports")
 
             if not self.account_configs:
                 logger.warning("No accounts configured. Skipping buy/sell execution.")
@@ -1789,10 +1788,10 @@ class StockTrackingAgent:
             signaled_tickers: set[str] = set()
             analysis_states: list[dict[str, Any]] = []
 
-            for pdf_report_path in pdf_report_paths:
-                analysis_result = await self._analyze_report_core(pdf_report_path)
+            for report_path in report_paths:
+                analysis_result = await self._analyze_report_core(report_path)
                 if not analysis_result.get("success", False):
-                    logger.error(f"Report analysis failed: {pdf_report_path} - {analysis_result.get('error', 'Unknown error')}")
+                    logger.error(f"Report analysis failed: {report_path} - {analysis_result.get('error', 'Unknown error')}")
                     continue
                 analysis_states.append(
                     {
@@ -2233,12 +2232,12 @@ class StockTrackingAgent:
         except Exception as e:
             logger.error(f"Error in _send_to_translation_channels: {str(e)}")
 
-    async def run(self, pdf_report_paths: List[str], chat_id: str = None, language: str = "ko", telegram_config=None, trigger_results_file: str = None, sector_names: list = None) -> bool | None:
+    async def run(self, report_paths: List[str], chat_id: str = None, language: str = "ko", telegram_config=None, trigger_results_file: str = None, sector_names: list = None) -> bool | None:
         """
         Main execution function for stock tracking system
 
         Args:
-            pdf_report_paths: List of analysis report file paths
+            report_paths: List of analysis report file paths
             chat_id: Telegram channel ID (no messages sent if None)
             language: Message language ("ko" or "en")
             telegram_config: TelegramConfig object for multi-language support
@@ -2284,7 +2283,7 @@ class StockTrackingAgent:
 
             try:
                 # Process reports
-                buy_count, sell_count = await self.process_reports(pdf_report_paths)
+                buy_count, sell_count = await self.process_reports(report_paths)
 
                 # Send Telegram message (only if chat_id is provided)
                 if chat_id:

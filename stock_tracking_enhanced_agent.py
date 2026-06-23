@@ -356,18 +356,18 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
             logger.error(f"{ticker} Error calculating dynamic target: {str(e)}")
             return buy_price * 1.1  # Apply default 10% target return on error
 
-    async def process_reports(self, pdf_report_paths: List[str]) -> Tuple[int, int]:
+    async def process_reports(self, report_paths: List[str]) -> Tuple[int, int]:
         """
         Process analysis reports and make buy/sell decisions
 
         Args:
-            pdf_report_paths: List of pdf analysis report file paths
+            report_paths: List of analysis report file paths
 
         Returns:
             Tuple[int, int]: Buy count, Sell count
         """
         try:
-            logger.info(f"Starting processing of {len(pdf_report_paths)} reports")
+            logger.info(f"Starting processing of {len(report_paths)} reports")
 
             # Buy/Sell counters
             buy_count = 0
@@ -389,12 +389,12 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
                 logger.info("No stocks sold")
 
             # 2. Analyze new reports and make buy decisions
-            for pdf_report_path in pdf_report_paths:
+            for report_path in report_paths:
                 # Analyze report
-                analysis_result = await self.analyze_report(pdf_report_path)
+                analysis_result = await self.analyze_report(report_path)
 
                 if not analysis_result.get("success", False):
-                    logger.error(f"Report analysis failed: {pdf_report_path} - {analysis_result.get('error', 'Unknown error')}")
+                    logger.error(f"Report analysis failed: {report_path} - {analysis_result.get('error', 'Unknown error')}")
                     continue
 
                 # Skip if already holding this stock (no telegram message for already held stocks)
