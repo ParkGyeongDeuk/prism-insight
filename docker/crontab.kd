@@ -4,17 +4,17 @@ PATH=/root/.local/bin:/app/venv/bin:/root/.cargo/bin:/usr/local/sbin:/usr/local/
 PYTHONPATH=/app/prism-insight
 
 # Daily generated-artifact cleanup (logs 7 days, reports 30 days).
-0 3 * * * cd /app/prism-insight && chmod +x utils/cleanup_logs.sh && ./utils/cleanup_logs.sh >> /app/prism-insight/logs/cleanup.log 2>&1
+0 3 * * * cd /app/prism-insight && set -a && . /app/prism-insight/.env && set +a && chmod +x utils/cleanup_logs.sh && ./utils/cleanup_logs.sh >> /app/prism-insight/logs/cleanup.log 2>&1
 
 # Weekly trading-memory compression (Sunday, after cleanup).
-30 3 * * 0 cd /app/prism-insight && python3 compress_trading_memory.py >> /app/prism-insight/logs/compression.log 2>&1
+30 3 * * 0 cd /app/prism-insight && set -a && . /app/prism-insight/.env && set +a && python3 compress_trading_memory.py >> /app/prism-insight/logs/compression.log 2>&1
 
 # Refresh the KR stock code/name map before analysis (Monday-Friday).
-0 7 * * 1-5 cd /app/prism-insight && python3 update_stock_data.py >> /app/prism-insight/logs/stock_update_$(date +\%Y\%m\%d).log 2>&1
+0 7 * * 1-5 cd /app/prism-insight && set -a && . /app/prism-insight/.env && set +a && python3 update_stock_data.py >> /app/prism-insight/logs/stock_update_$(date +\%Y\%m\%d).log 2>&1
 
 # Morning and afternoon KR analysis (Monday-Friday).
-30 9 * * 1-5 cd /app/prism-insight && python3 stock_analysis_orchestrator.py --mode morning >> /app/prism-insight/logs/kr_morning_$(date +\%Y\%m\%d).log 2>&1
-40 15 * * 1-5 cd /app/prism-insight && python3 stock_analysis_orchestrator.py --mode afternoon >> /app/prism-insight/logs/kr_afternoon_$(date +\%Y\%m\%d).log 2>&1
+30 9 * * 1-5 cd /app/prism-insight && set -a && . /app/prism-insight/.env && set +a && python3 stock_analysis_orchestrator.py --mode morning >> /app/prism-insight/logs/kr_morning_$(date +\%Y\%m\%d).log 2>&1
+40 15 * * 1-5 cd /app/prism-insight && set -a && . /app/prism-insight/.env && set +a && python3 stock_analysis_orchestrator.py --mode afternoon >> /app/prism-insight/logs/kr_afternoon_$(date +\%Y\%m\%d).log 2>&1
 
 # Track 7/14/30-day performance after the market closes (Monday-Friday).
-0 17 * * 1-5 cd /app/prism-insight && python3 performance_tracker_batch.py >> /app/prism-insight/logs/performance_$(date +\%Y\%m\%d).log 2>&1
+0 17 * * 1-5 cd /app/prism-insight && set -a && . /app/prism-insight/.env && set +a && python3 performance_tracker_batch.py >> /app/prism-insight/logs/performance_$(date +\%Y\%m\%d).log 2>&1
