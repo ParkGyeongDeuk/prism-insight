@@ -212,8 +212,12 @@ Perplexity key는 사용자가 발급 및 설정했다. `.env`와 필요한 secr
   - Loop A/B/C live mode: `LOOP_A_LIVE=true`, `LOOP_B_LIVE=true`, `LOOP_C_LIVE=true`
   - 비전 분석: `PRISM_FEATURE_VISION=on`
   - 비전 매수품질 live 영향: `PRISM_VISION_SHADOW=false`
+- 원본 v2.15.0 구현도 신규 기능이 merge만으로 실제 주문/매매 판단에 바로 영향 주지 않도록 기본값을 OFF/SHADOW로 둔다.
+  - Loop A/B/C는 각 `*_LIVE`가 기본 `false`라 실제 sell/amend/cancel 경로 대신 "would" 로그와 loop table 기록만 수행한다.
+  - 비전 매수품질 검사는 `PRISM_FEATURE_VISION` 기본값이 `off`이며, 켜더라도 현재는 `[BUY_QUALITY][SHADOW]` 로그만 남기고 매수 판단에 주입하지 않는다.
 - `docker/crontab.kd`에는 기존 국내 배치, cleanup, compression, performance tracker만 유지한다.
 - v2.15.0 병합 후에는 `tools/feature_status.py`로 실제 런타임 상태를 확인하되, Loop/vision이 OFF 또는 미스케줄/SHADOW인 상태를 정상으로 본다.
+- 다음 원본 버전을 merge할 때는 `tools/feature_status.py`, `cores/analysis.py`, `tools/loop_a_hardstop.py`, `tools/loop_b_trend_exit.py`, `tools/loop_c_fill_chaser.py`의 기본 게이트가 계속 OFF/SHADOW인지 먼저 확인한다.
 
 ## 앞으로 꼭 관찰해야 할 항목
 
