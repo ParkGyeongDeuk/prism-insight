@@ -257,6 +257,15 @@ tail -200 logs/loop_b_shadow_$(date +%Y%m%d).log
 tail -200 logs/loop_c_shadow_$(date +%Y%m%d).log
 ```
 
+자료가 쌓인 뒤에는 SHADOW 시그널과 실제 결과를 비교해 LIVE 전환 여부를 판단한다.
+
+- Loop A/B 매도 시그널은 `WOULD SELL` 발생 시각, 당시 가격, 실제 기존 로직의 이후 보유/매도 결과를 비교한다.
+- Loop A는 급락 방어 목적이므로, SHADOW 매도 시점 이후 추가 하락을 줄였는지와 직후 반등으로 인한 조기 매도 오판이 많았는지를 본다.
+- Loop B는 추세 이탈 목적이므로, `breach_streak`가 쌓인 뒤 실제 추세 하락이 이어졌는지와 휩쏘 비율이 과도한지를 본다.
+- Loop C는 미체결 주문 기준으로 `WOULD AMEND`/`WOULD CANCEL`이 실제 체결률, 체결가, 불필요한 추격 주문 감소에 도움이 됐을지를 본다.
+- 비교 대상 DB 테이블은 `loop_a_inflight_orders`, `loop_b_position_state`, `loop_b_inflight_orders`, `loop_c_chase_log`이며, 필요하면 별도 분석 스크립트로 SHADOW 시그널과 실제 KIS/DB 결과를 매칭한다.
+- LIVE 전환 검토 전에는 단순 날짜 수보다 실제 시그널 수를 우선한다. 보유 종목이나 미체결 주문이 없어 시그널이 없던 기간은 검증 표본으로 보지 않는다.
+
 LIVE 전환은 자동으로 하지 않는다. 최소 첫 보유 종목 발생 후 며칠간 SHADOW 로그를 보고, KIS/DB/Telegram 정합성 확인이 끝난 뒤 Loop A부터 별도로 판단한다. Loop B는 휩쏘 검증이 필요하므로 더 긴 관찰 기간을 둔다. Loop C는 정정/취소 TR 검증 부담이 가장 크므로 가장 마지막에 검토한다.
 
 ## 앞으로 꼭 관찰해야 할 항목
