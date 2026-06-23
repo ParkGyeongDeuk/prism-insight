@@ -219,6 +219,18 @@ Perplexity key는 사용자가 발급 및 설정했다. `.env`와 필요한 secr
 - v2.15.0 병합 후에는 `tools/feature_status.py`로 실제 런타임 상태를 확인하되, Loop/vision이 OFF 또는 미스케줄/SHADOW인 상태를 정상으로 본다.
 - 다음 원본 버전을 merge할 때는 `tools/feature_status.py`, `cores/analysis.py`, `tools/loop_a_hardstop.py`, `tools/loop_b_trend_exit.py`, `tools/loop_c_fill_chaser.py`의 기본 게이트가 계속 OFF/SHADOW인지 먼저 확인한다.
 
+병합 후 컨테이너 반영:
+
+- 병합 commit 이후 `docker compose build prism-insight`와 `docker compose up -d --force-recreate prism-insight`로 이미지를 재빌드하고 컨테이너를 교체했다.
+- 교체 전 실행 중인 분석/주문 관련 Python 프로세스가 없음을 확인했다.
+- 교체 후 확인 결과:
+  - 컨테이너 상태: healthy
+  - `tools/feature_status.py`가 컨테이너에 존재
+  - `cores/llm/openai_responses_llm.py`는 stateless multi-turn 구현 반영
+  - crontab은 `docker/crontab.kd` 기준으로 설치됨
+  - `StockTrackingAgent._resolve_max_slots()` 결과는 `5`
+  - feature status는 OAuth `LIVE`, Loop A `OFF`, Loop B/C `미스케줄`, vision 계열 `OFF`
+
 ## 앞으로 꼭 관찰해야 할 항목
 
 다음 항목은 아직 장기간 검증이 끝난 것이 아니므로, 새 context에서 작업을 이어갈 때 우선 확인한다.
