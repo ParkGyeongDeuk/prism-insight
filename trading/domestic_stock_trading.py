@@ -793,20 +793,19 @@ class DomesticStockTrading:
         else:
             params["RSVN_ORD_END_DT"] = ""
 
+        order_type_str = {
+            "01": "Market",
+            "00": f"Limit({ord_unpr} KRW)",
+            "05": "Pre-market after-hours"
+        }.get(ord_dvsn_cd, "")
+        period_str = f"Period reservation(~{end_date})" if end_date else "Regular reservation"
+
         try:
             res = self._request(api_url, tr_id, params, postFlag=True)
 
             if res.isOK():
                 output = res.getBody().output
                 order_no = output.get('RSVN_ORD_SEQ', '')  # Reserved order receipt number
-
-                order_type_str = {
-                    "01": "Market",
-                    "00": f"Limit({ord_unpr} KRW)",
-                    "05": "Pre-market after-hours"
-                }.get(ord_dvsn_cd, "")
-
-                period_str = f"Period reservation(~{end_date})" if end_date else "Regular reservation"
 
                 logger.info(f"[{stock_code}] Reserved buy order successful: {buy_quantity} shares, {order_type_str}, {period_str}")
 
@@ -824,6 +823,37 @@ class DomesticStockTrading:
                 # Market buy will fail with APBK0918 "장운영시간이 아닙니다" outside trading hours
                 error_msg = f"{res.getErrorCode()} - {res.getErrorMessage()}"
                 logger.error(f"Reserved buy order failed: {error_msg}")
+                matched_order = self._find_matching_open_buy_order(
+                    stock_code=stock_code,
+                    quantity=buy_quantity,
+                    order_price=_safe_int(ord_unpr),
+                    order_type=ord_dvsn_cd,
+                )
+                if matched_order:
+                    order_no = matched_order.get('order_no') or matched_order.get('orgn_odno')
+                    logger.warning(
+                        "[%s] Reserved buy order response failed but matching open buy order was found: "
+                        "order_no=%s, qty=%s, price=%s",
+                        stock_code,
+                        order_no,
+                        matched_order.get('ord_qty'),
+                        matched_order.get('ord_unpr'),
+                    )
+                    return {
+                        'success': True,
+                        'order_no': order_no,
+                        'stock_code': stock_code,
+                        'quantity': buy_quantity,
+                        'order_type': order_type_str,
+                        'period_type': period_str,
+                        'krx_fwdg_ord_orgno': matched_order.get('krx_fwdg_ord_orgno'),
+                        'reconciled_after_error': True,
+                        'original_error': error_msg,
+                        'message': (
+                            f"Reserved buy order accepted after open-order reconciliation "
+                            f"({buy_quantity} shares, {order_type_str}, {period_str})"
+                        )
+                    }
                 return {
                     'success': False,
                     'order_no': None,
@@ -841,6 +871,58 @@ class DomesticStockTrading:
                 'quantity': buy_quantity,
                 'message': f"Error during reserved buy order: {str(e)}"
             }
+
+    def _find_matching_open_buy_order(
+        self,
+        stock_code: str,
+        quantity: int,
+        order_price: int,
+        order_type: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Find an open buy order that matches a just-submitted reserved order.
+
+        KIS paper trading can occasionally return an error-like response even
+        when the reserved order was accepted. This helper is intentionally exact:
+        it only treats the failed response as accepted when KIS shows the same
+        stock, buy side, quantity, and limit/market price as still open.
+        """
+        try:
+            orders = self.get_revisable_orders(stock_code)
+        except Exception as exc:
+            logger.warning(f"[{stock_code}] Open-order reconciliation failed: {exc}")
+            return None
+
+        if getattr(self, "_last_revisable_orders_query_ok", True) is False:
+            logger.warning(f"[{stock_code}] Open-order reconciliation skipped because inquiry failed")
+            return None
+
+        expected_code = str(stock_code).strip()
+        expected_qty = int(quantity)
+        expected_price = int(order_price or 0)
+
+        for order in orders:
+            if str(order.get('stock_code', '')).strip() != expected_code:
+                continue
+            if str(order.get('sll_buy_dvsn_cd', '')).strip() != "02":
+                continue
+            if _safe_int(order.get('ord_qty')) != expected_qty:
+                continue
+
+            actual_price = _safe_int(order.get('ord_unpr'))
+            if order_type == "00" and actual_price != expected_price:
+                continue
+            if order_type == "01" and actual_price != 0:
+                continue
+
+            remaining_qty = _safe_int(order.get('psbl_qty'))
+            if remaining_qty <= 0:
+                remaining_qty = _safe_int(order.get('ord_qty')) - _safe_int(order.get('tot_ccld_qty'))
+            if remaining_qty <= 0:
+                continue
+
+            return order
+
+        return None
 
     def sell_all_market_price(self, stock_code: str, quantity: int = None) -> Dict[str, Any]:
         """
@@ -1328,9 +1410,12 @@ class DomesticStockTrading:
                         )
 
                         if buy_result['success']:
+                            actual_quantity = _safe_int(buy_result.get('quantity'), buy_quantity)
                             result['success'] = True
                             result['order_no'] = buy_result['order_no']
-                            result['message'] = f"Buy completed: {buy_quantity} shares x {current_price_info['current_price']:,} KRW = {result['total_amount']:,} KRW"
+                            result['quantity'] = actual_quantity
+                            result['total_amount'] = actual_quantity * current_price_info['current_price']
+                            result['message'] = f"Buy completed: {actual_quantity} shares x {current_price_info['current_price']:,} KRW = {result['total_amount']:,} KRW"
                             logger.info(f"[Async Buy API] {stock_code} buy successful")
                         else:
                             result['message'] = f"Buy failed: {buy_result['message']}"

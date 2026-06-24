@@ -242,6 +242,21 @@ class _FakeKISResponse:
         return self._body
 
 
+class _FakeKISErrorResponse:
+    def __init__(self, code="500", message='{"rt_cd":"0","msg_cd":"IGW00009"}'):
+        self._code = code
+        self._message = message
+
+    def isOK(self):
+        return False
+
+    def getErrorCode(self):
+        return self._code
+
+    def getErrorMessage(self):
+        return self._message
+
+
 def test_demo_revisable_orders_use_supported_daily_inquiry(monkeypatch):
     trader = dst.DomesticStockTrading.__new__(dst.DomesticStockTrading)
     trader.mode = "demo"
@@ -337,6 +352,96 @@ def test_limit_buy_preserves_cancel_identifiers(monkeypatch):
     assert result["success"] is True
     assert result["order_no"] == "2002"
     assert result["krx_fwdg_ord_orgno"] == "54321"
+
+
+def _reserved_buy_trader(monkeypatch, open_orders):
+    trader = dst.DomesticStockTrading.__new__(dst.DomesticStockTrading)
+    trader.mode = "demo"
+    trader.auto_trading = True
+    trader.buy_amount = 320000
+    trader.trenv = SimpleNamespace(my_acct="12345678", my_prod="01")
+
+    monkeypatch.setattr(trader, "_request", lambda *args, **kwargs: _FakeKISErrorResponse())
+
+    def fake_get_revisable_orders(stock_code=None):
+        trader._last_revisable_orders_query_ok = True
+        if stock_code is None:
+            return list(open_orders)
+        return [order for order in open_orders if order.get("stock_code") == stock_code]
+
+    monkeypatch.setattr(trader, "get_revisable_orders", fake_get_revisable_orders)
+    return trader
+
+
+def test_reserved_buy_false_negative_reconciles_matching_open_order(monkeypatch):
+    trader = _reserved_buy_trader(
+        monkeypatch,
+        [
+            {
+                "order_no": "0000000321",
+                "orgn_odno": "0000000321",
+                "stock_code": "006340",
+                "ord_qty": 29,
+                "ord_unpr": 10700,
+                "tot_ccld_qty": 0,
+                "psbl_qty": 29,
+                "sll_buy_dvsn_cd": "02",
+                "ord_dvsn": "00",
+                "krx_fwdg_ord_orgno": "00950",
+            }
+        ],
+    )
+
+    result = trader.buy_reserved_order("006340", buy_amount=320000, limit_price=10700)
+
+    assert result["success"] is True
+    assert result["order_no"] == "0000000321"
+    assert result["quantity"] == 29
+    assert result["reconciled_after_error"] is True
+    assert result["krx_fwdg_ord_orgno"] == "00950"
+
+
+def test_reserved_buy_false_negative_without_matching_order_stays_failed(monkeypatch):
+    trader = _reserved_buy_trader(
+        monkeypatch,
+        [
+            {
+                "order_no": "0000000322",
+                "stock_code": "006340",
+                "ord_qty": 10,
+                "ord_unpr": 10700,
+                "tot_ccld_qty": 0,
+                "psbl_qty": 10,
+                "sll_buy_dvsn_cd": "02",
+            }
+        ],
+    )
+
+    result = trader.buy_reserved_order("006340", buy_amount=320000, limit_price=10700)
+
+    assert result["success"] is False
+    assert result["order_no"] is None
+
+
+def test_reserved_buy_reconciliation_ignores_sell_orders(monkeypatch):
+    trader = _reserved_buy_trader(
+        monkeypatch,
+        [
+            {
+                "order_no": "0000000323",
+                "stock_code": "006340",
+                "ord_qty": 29,
+                "ord_unpr": 10700,
+                "tot_ccld_qty": 0,
+                "psbl_qty": 29,
+                "sll_buy_dvsn_cd": "01",
+            }
+        ],
+    )
+
+    result = trader.buy_reserved_order("006340", buy_amount=320000, limit_price=10700)
+
+    assert result["success"] is False
 
 
 def test_domestic_trader_uses_account_buy_amount_override(monkeypatch):
