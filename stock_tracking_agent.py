@@ -1454,6 +1454,32 @@ class StockTrackingAgent:
                 logger.info("No holdings")
                 return []
 
+            pending_order_tickers = []
+            for holding in holdings:
+                try:
+                    scenario_data = json.loads(holding.get('scenario') or '{}')
+                except (TypeError, json.JSONDecodeError):
+                    scenario_data = {}
+                if scenario_data.get('order_status') == 'reserved_open':
+                    pending_order_tickers.append(holding.get('ticker'))
+
+            broker_portfolio_by_ticker: Dict[str, Dict[str, Any]] = {}
+            if pending_order_tickers:
+                try:
+                    from trading.domestic_stock_trading import AsyncTradingContext
+                    async with AsyncTradingContext(account_name=holdings[0].get("account_name")) as trading:
+                        broker_portfolio = await asyncio.to_thread(trading.get_portfolio)
+                        if getattr(trading, "_last_portfolio_query_ok", False):
+                            broker_portfolio_by_ticker = {
+                                str(row.get("stock_code", "")).strip(): row
+                                for row in broker_portfolio
+                                if int(row.get("quantity", 0) or 0) > 0
+                            }
+                        else:
+                            logger.warning("Pending reserved-order reconciliation skipped: KIS portfolio inquiry failed")
+                except Exception as e:
+                    logger.warning(f"Pending reserved-order reconciliation skipped: {e}")
+
             sold_stocks = []
 
             # 이벤트 강제청산 자동탐지: 사이클당 1회 KIS 종목상태코드 일괄 prefetch.
@@ -1483,6 +1509,7 @@ class StockTrackingAgent:
             for stock in holdings:
                 ticker = stock.get('ticker')
                 company_name = stock.get('company_name')
+                scenario_json = {}
 
                 # Query current stock price
                 current_price = await self._get_current_stock_price(ticker)
@@ -1515,6 +1542,40 @@ class StockTrackingAgent:
 
                 # Current time
                 now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+                if scenario_json.get('order_status') == 'reserved_open':
+                    broker_position = broker_portfolio_by_ticker.get(ticker)
+                    if not broker_position:
+                        self.cursor.execute(
+                            """UPDATE stock_holdings
+                               SET current_price = ?, last_updated = ?
+                               WHERE id = ?""",
+                            (current_price, now, stock.get("id"))
+                        )
+                        self.conn.commit()
+                        logger.info(f"{ticker}({company_name}) reserved buy still open; skipping sell decision")
+                        continue
+
+                    avg_price = float(broker_position.get("avg_price") or stock.get('buy_price') or current_price)
+                    scenario_json['order_status'] = 'filled'
+                    scenario_json['filled_from_reserved_order'] = True
+                    scenario_json['filled_at'] = now
+                    scenario_json['highest_price'] = max(
+                        float(scenario_json.get('highest_price') or 0),
+                        avg_price,
+                        current_price,
+                    )
+                    scenario_str = json.dumps(scenario_json, ensure_ascii=False)
+                    stock['scenario'] = scenario_str
+                    stock['buy_price'] = avg_price
+                    self.cursor.execute(
+                        """UPDATE stock_holdings
+                           SET buy_price = ?, current_price = ?, last_updated = ?, scenario = ?
+                           WHERE id = ?""",
+                        (avg_price, current_price, now, scenario_str, stock.get("id"))
+                    )
+                    self.conn.commit()
+                    logger.info(f"{ticker}({company_name}) reserved buy filled; converted to active holding")
 
                 # Analyze sell decision
                 should_sell, sell_reason = await self._analyze_sell_decision(stock)
@@ -1669,12 +1730,30 @@ class StockTrackingAgent:
             message = f"📊 프리즘 시뮬레이터 | 실시간 포트폴리오 ({datetime.now().strftime('%Y-%m-%d %H:%M')})\n\n"
 
             # 1. Portfolio summary
-            message += f"🔸 현재 보유: {len(holdings) if holdings else 0}/{self.max_slots}개\n"
+            pending_count = 0
+            if holdings:
+                for h in holdings:
+                    try:
+                        scenario_data = json.loads(h.get('scenario') or '{}')
+                    except (TypeError, json.JSONDecodeError):
+                        scenario_data = {}
+                    if scenario_data.get('order_status') == 'reserved_open':
+                        pending_count += 1
+            active_count = (len(holdings) if holdings else 0) - pending_count
+            message += f"🔸 현재 보유: {active_count}/{self.max_slots}개\n"
+            if pending_count:
+                message += f"🔸 예약/미체결 추적: {pending_count}개\n"
 
             # Best profit/loss stock information (if any)
             if holdings and len(holdings) > 0:
                 profit_rates = []
                 for h in holdings:
+                    try:
+                        scenario_data = json.loads(h.get('scenario') or '{}')
+                    except (TypeError, json.JSONDecodeError):
+                        scenario_data = {}
+                    if scenario_data.get('order_status') == 'reserved_open':
+                        continue
                     buy_price = h.get('buy_price', 0)
                     current_price = h.get('current_price', 0)
                     if buy_price > 0:
@@ -1707,12 +1786,14 @@ class StockTrackingAgent:
 
                     # Extract sector information from scenario
                     sector = "알 수 없음"
+                    scenario_data = {}
                     try:
                         if isinstance(scenario_str, str):
                             scenario_data = json.loads(scenario_str)
                             sector = scenario_data.get('sector', '알 수 없음')
                     except:
                         pass
+                    status_label = " (예약/미체결)" if scenario_data.get('order_status') == 'reserved_open' else ""
 
                     # Update sector count
                     sector_counts[sector] = sector_counts.get(sector, 0) + 1
@@ -1723,7 +1804,7 @@ class StockTrackingAgent:
                     buy_datetime = datetime.strptime(buy_date, "%Y-%m-%d %H:%M:%S") if buy_date else datetime.now()
                     days_passed = (datetime.now() - buy_datetime).days
 
-                    message += f"- {company_name}({ticker}) [{sector}]\n"
+                    message += f"- {company_name}({ticker}){status_label} [{sector}]\n"
                     message += f"  매수가: {buy_price:,.0f}원 / 현재가: {current_price:,.0f}원\n"
                     message += f"  목표가: {target_price:,.0f}원 / 손절가: {stop_loss:,.0f}원\n"
                     message += f"  수익률: {arrow} {profit_rate:.2f}% / 보유기간: {days_passed}일\n\n"
