@@ -70,6 +70,18 @@ PRISM_KR_CASH_RESERVE=400000
 - `docker/crontab.kd`를 컨테이너의 `/app/prism-insight/docker/crontab`으로 mount한다.
 - OAuth callback port `1455`를 `127.0.0.1`에만 노출한다.
 
+## 로컬 테스트 의존성
+
+운영 의존성인 `requirements.txt`와 Dockerfile은 원본 merge 부담과 운영 이미지 변화를 줄이기 위해 그대로 둔다.
+
+로컬 검증이 필요할 때만 `requirements-dev.txt`를 컨테이너에 설치한다.
+
+```bash
+docker compose exec -T prism-insight pip install -r requirements-dev.txt
+```
+
+현재 dev 의존성은 `pytest`, `pytest-asyncio`만 둔다. core/trading 런타임 모듈에는 영향을 주지 않는 테스트 실행 도구로만 취급한다.
+
 ## 국내 모의투자 자금 설정
 
 현재 운용 가정:
