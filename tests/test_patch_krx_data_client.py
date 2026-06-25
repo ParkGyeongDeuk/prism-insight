@@ -4,6 +4,7 @@ from utils.patch_krx_data_client import (
     LOGOUT_PATCH_MARKER,
     NAVIGATION_PATCH_MARKER,
     PATCH_MARKER,
+    VALIDATION_GRACE_PATCH_MARKER,
     patch_source,
 )
 
@@ -31,6 +32,13 @@ async def _login_async_krx(self):
 
             js_cookies_str = await page.evaluate("document.cookie")
             logger.info(f"[try {retry+1}/{max_cookie_retries}] JavaScript cookies: {js_cookies_str}")
+
+    def _validate_session(self) -> bool:
+        try:
+            return True
+        except Exception as e:
+            logger.warning(f"세션 검증 실패: {e}")
+            return False
 '''
 
 
@@ -41,9 +49,11 @@ class PatchKrxDataClientTests(unittest.TestCase):
         self.assertIn(PATCH_MARKER, patched)
         self.assertIn(LOGOUT_PATCH_MARKER, patched)
         self.assertIn(NAVIGATION_PATCH_MARKER, patched)
+        self.assertIn(VALIDATION_GRACE_PATCH_MARKER, patched)
         self.assertIn('wait_until="domcontentloaded", timeout=30000', patched)
         self.assertNotIn('wait_until="networkidle", timeout=self.PAGE_LOAD_TIMEOUT', patched)
         self.assertEqual(patched.count('wait_until="domcontentloaded"'), 4)
+        self.assertIn("requests.exceptions.Timeout", patched)
         self.assertIn("JavaScript cookie names", patched)
         self.assertNotIn("JavaScript cookies: {js_cookies_str}", patched)
 

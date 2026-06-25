@@ -10,6 +10,9 @@ from pathlib import Path
 PATCH_MARKER = "PRISM compatibility: confirm an existing KRX login session."
 LOGOUT_PATCH_MARKER = "PRISM compatibility: make KRX logout cleanup best-effort."
 NAVIGATION_PATCH_MARKER = "PRISM compatibility: avoid networkidle waits on KRX pages."
+VALIDATION_GRACE_PATCH_MARKER = (
+    "PRISM compatibility: keep recent KRX sessions on validation transport errors."
+)
 LOGIN_CLICK = "            await login_btn.click()\n"
 LOGIN_HOME = (
     '            home_url = "https://data.krx.co.kr/contents/MDC/MAIN/main/index.cmd"\n'
@@ -21,6 +24,11 @@ LOGOUT_GOTO = (
 )
 LOGOUT_SLEEP = (
     "            await asyncio.sleep(10)  # KRX 서버에서 세션 정리 시간 확보 (충분히 대기)\n"
+)
+VALIDATION_EXCEPT = (
+    "        except Exception as e:\n"
+    '            logger.warning(f"세션 검증 실패: {e}")\n'
+    "            return False\n"
 )
 NETWORKIDLE_GOTOS = (
     (
@@ -68,6 +76,28 @@ LOGOUT_PATCH = '''
             await asyncio.sleep(2)
 '''
 
+VALIDATION_GRACE_PATCH = f'''        except Exception as e:
+            logger.warning(f"세션 검증 실패: {{e}}")
+
+            # {VALIDATION_GRACE_PATCH_MARKER}
+            # Treat transient KRX validation transport errors differently from
+            # explicit LOGOUT/HTML responses. The next real API request will
+            # still surface a true expired-session response.
+            if self._last_validated and isinstance(
+                e,
+                (requests.exceptions.Timeout, requests.exceptions.ConnectionError),
+            ):
+                elapsed = datetime.now() - self._last_validated
+                if elapsed < timedelta(minutes=30):
+                    logger.warning(
+                        "최근 검증된 KRX 세션의 검증 요청이 실패했지만 "
+                        f"세션을 유지합니다. elapsed={{elapsed}}"
+                    )
+                    return True
+
+            return False
+'''
+
 
 def patch_source(source: str) -> str:
     """Return patched source, failing closed when upstream structure changes."""
@@ -104,6 +134,11 @@ def patch_source(source: str) -> str:
         for original, replacement in NETWORKIDLE_GOTOS:
             if original in source:
                 source = source.replace(original, replacement)
+
+    if VALIDATION_GRACE_PATCH_MARKER not in source:
+        if VALIDATION_EXCEPT not in source:
+            raise RuntimeError("KRX validation exception anchor not found; review upstream changes")
+        source = source.replace(VALIDATION_EXCEPT, VALIDATION_GRACE_PATCH, 1)
 
     if PATCH_MARKER not in source:
         click_pos = source.find(LOGIN_CLICK)
