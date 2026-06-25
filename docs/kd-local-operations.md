@@ -50,6 +50,8 @@
 
 로컬 운영은 기본 `docker-compose.yml` 위에 `docker-compose.local.yml`을 덮어씌우는 방식이다.
 
+사용자가 직접 빌드, 실행, 중지, 로그 확인, 컨테이너 접속, 수동 실행, 테스트를 할 때는 `docs/kd-local-docker-guide.md`를 우선 참고한다. 이 문서는 현재 kd-local compose 구조와 cron 운영 방식을 기준으로 작성된 실무 명령 가이드다.
+
 `.env`에는 다음 값이 필요하다.
 
 ```env
