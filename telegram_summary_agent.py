@@ -108,8 +108,8 @@ class TelegramSummaryGenerator:
         """
         Extract ticker code, company name, date etc. from filename
         """
-        pattern = r'(\w+)_(.+)_(\d{8})_.*\.pdf'
-        match = re.match(pattern, filename)
+        pattern = r'^([A-Za-z0-9]+)_(.+)_(\d{8})_.*\.(?:pdf|md|markdown)$'
+        match = re.match(pattern, filename, re.IGNORECASE)
 
         if match:
             stock_code = match.group(1)
@@ -430,7 +430,7 @@ class TelegramSummaryGenerator:
             return telegram_message
 
         except Exception as e:
-            log_openai_error(logger, e, f"telegram summary report processing for {report_pdf_path}")
+            log_openai_error(logger, e, f"telegram summary report processing for {report_path}")
             logger.error(f"Error processing report: {e}")
             raise
 

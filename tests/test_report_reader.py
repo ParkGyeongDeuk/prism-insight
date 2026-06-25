@@ -145,3 +145,24 @@ async def test_telegram_summary_process_report_uses_sanitized_markdown(tmp_path,
     assert "요약 대상 본문" in captured["report_content"]
     assert "data:image" not in captured["report_content"]
     assert captured["metadata"]["stock_code"] == "005930"
+    assert (tmp_path / "005930_삼성전자_telegram.txt").exists()
+
+
+def test_telegram_summary_metadata_supports_markdown_report_names():
+    from telegram_summary_agent import TelegramSummaryGenerator
+
+    generator = TelegramSummaryGenerator()
+
+    cases = [
+        ("005930_삼성전자_20260623_morning_gpt5.md", "005930", "삼성전자"),
+        ("005930_삼성전자_20260623_morning_gpt5.markdown", "005930", "삼성전자"),
+        ("005930_삼성전자_20260623_morning_gpt5.pdf", "005930", "삼성전자"),
+        ("089030_Stock_089030_20260625_morning_gpt5.4-mini.md", "089030", "Stock_089030"),
+    ]
+
+    for filename, stock_code, stock_name in cases:
+        metadata = generator.extract_metadata_from_filename(filename)
+        expected_date = "2026.06.23" if stock_code == "005930" else "2026.06.25"
+        assert metadata["stock_code"] == stock_code
+        assert metadata["stock_name"] == stock_name
+        assert metadata["date"] == expected_date
