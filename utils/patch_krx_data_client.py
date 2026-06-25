@@ -8,11 +8,34 @@ from pathlib import Path
 
 
 PATCH_MARKER = "PRISM compatibility: confirm an existing KRX login session."
+LOGOUT_PATCH_MARKER = "PRISM compatibility: make KRX logout cleanup best-effort."
+NAVIGATION_PATCH_MARKER = "PRISM compatibility: avoid networkidle waits on KRX pages."
 LOGIN_CLICK = "            await login_btn.click()\n"
 LOGIN_HOME = (
     '            home_url = "https://data.krx.co.kr/contents/MDC/MAIN/main/index.cmd"\n'
 )
 LOGIN_SLEEP = "            await asyncio.sleep(3)\n"
+LOGOUT_GOTO = (
+    '            await page.goto(logout_url, wait_until="networkidle", '
+    "timeout=self.PAGE_LOAD_TIMEOUT)\n"
+)
+LOGOUT_SLEEP = (
+    "            await asyncio.sleep(10)  # KRX 서버에서 세션 정리 시간 확보 (충분히 대기)\n"
+)
+NETWORKIDLE_GOTOS = (
+    (
+        '            await page.goto(login_url, wait_until="networkidle", timeout=self.PAGE_LOAD_TIMEOUT)\n',
+        '            await page.goto(login_url, wait_until="domcontentloaded", timeout=self.PAGE_LOAD_TIMEOUT)\n',
+    ),
+    (
+        '            await page.goto(home_url, wait_until="networkidle", timeout=self.PAGE_LOAD_TIMEOUT)\n',
+        '            await page.goto(home_url, wait_until="domcontentloaded", timeout=self.PAGE_LOAD_TIMEOUT)\n',
+    ),
+    (
+        '            await page.goto(data_page_url, wait_until="networkidle", timeout=self.PAGE_LOAD_TIMEOUT)\n',
+        '            await page.goto(data_page_url, wait_until="domcontentloaded", timeout=self.PAGE_LOAD_TIMEOUT)\n',
+    ),
+)
 
 MODAL_PATCH = '''
 
@@ -36,9 +59,52 @@ MODAL_PATCH = '''
                     break
 '''
 
+LOGOUT_PATCH = '''
+            # PRISM compatibility: make KRX logout cleanup best-effort.
+            try:
+                await page.goto(logout_url, wait_until="domcontentloaded", timeout=30000)
+            except Exception as logout_error:
+                logger.warning(f"KRX logout cleanup skipped: {logout_error}")
+            await asyncio.sleep(2)
+'''
+
 
 def patch_source(source: str) -> str:
     """Return patched source, failing closed when upstream structure changes."""
+    if LOGOUT_PATCH_MARKER not in source:
+        logout_pos = source.find(LOGOUT_GOTO)
+        if logout_pos < 0:
+            raise RuntimeError("KRX logout cleanup anchor not found; review upstream changes")
+
+        sleep_pos = source.find(LOGOUT_SLEEP, logout_pos)
+        if sleep_pos < 0:
+            raise RuntimeError("KRX logout sleep anchor not found; review upstream changes")
+
+        replace_end = sleep_pos + len(LOGOUT_SLEEP)
+        source = source[:logout_pos] + LOGOUT_PATCH + source[replace_end:]
+
+    if NAVIGATION_PATCH_MARKER not in source:
+        marker_added = False
+        for original, replacement in NETWORKIDLE_GOTOS:
+            if original not in source:
+                raise RuntimeError("KRX navigation anchor not found; review upstream changes")
+            source = source.replace(original, replacement)
+            if original.startswith("            await page.goto(login_url"):
+                login_anchor = replacement
+                source = source.replace(
+                    login_anchor,
+                    f"            # {NAVIGATION_PATCH_MARKER}\n{login_anchor}",
+                    1,
+                )
+                marker_added = True
+
+        if not marker_added:
+            raise RuntimeError("KRX navigation marker anchor not found; review upstream changes")
+    else:
+        for original, replacement in NETWORKIDLE_GOTOS:
+            if original in source:
+                source = source.replace(original, replacement)
+
     if PATCH_MARKER not in source:
         click_pos = source.find(LOGIN_CLICK)
         if click_pos < 0:

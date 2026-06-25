@@ -167,6 +167,8 @@ KRX Data 사이트 로그인 시 이미 로그인된 계정이라는 확인 moda
 적용된 보강:
 
 - 중복 로그인 확인 modal 처리
+- KRX 로그인 흐름의 page navigation은 `domcontentloaded` 기준으로 처리한다. KRX 페이지가 `load`/`networkidle` 상태로 안정화되지 않는 날에도 로그인 폼 접근, session cookie 확인, 실제 인증 실패 여부 판단은 계속 진행하기 위함이다.
+- 로그인 전 기존 session logout 정리는 best-effort 호출로 처리한다. KRX logout URL이 안정화되지 않아도 오전/오후 분석 전체가 60초 단위 재시도에 묶이지 않게 하기 위함이다.
 - KRX session cookie 재발급 및 저장
 - 로그인 재시도 중 cookie 값은 로그에 노출하지 않도록 처리
 
@@ -326,6 +328,7 @@ LIVE 전환은 자동으로 하지 않는다. 최소 첫 보유 종목 발생 �
 9. KRX 로그인 안정성
    - 중복 로그인 modal 처리는 적용됐지만, KRX 사이트 UI 변경 가능성이 있다.
    - `HTML 응답 - 로그인 필요`, cookie 발급 실패, timeout이 반복되면 로그인 흐름부터 다시 본다.
+   - logout cleanup timeout은 전체 배치를 막지 않도록 best-effort로 처리하지만, login iframe 접근 실패, 계정 인증 실패, cookie 발급 실패는 계속 원인 확인 대상이다.
 
 10. 실전투자 전환 전 안전 점검
     - 실전 key, 실계좌, 주문 가능 시간, 주문 종류, 매수/매도 금액, emergency stop 절차를 별도 checklist로 만든다.
