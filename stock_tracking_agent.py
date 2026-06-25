@@ -567,13 +567,18 @@ class StockTrackingAgent:
                 return scenario_json
 
             logger.error(f"Trading scenario parse failed. Full response: {response}")
-            return self._default_scenario()
+            scenario = self._default_scenario()
+            scenario["_analysis_error"] = "trading_scenario_parse_failed"
+            return scenario
 
         except Exception as e:
             log_openai_error(logger, e, "KR trading scenario extraction")
             logger.error(f"Error extracting trading scenario: {str(e)}")
             logger.error(traceback.format_exc())
-            return self._default_scenario()
+            scenario = self._default_scenario()
+            scenario["_analysis_error"] = "trading_scenario_llm_failed"
+            scenario["_analysis_error_detail"] = str(e)
+            return scenario
 
     def _default_scenario(self) -> Dict[str, Any]:
         """Return default trading scenario (delegates to tracking.helpers)"""
@@ -617,6 +622,10 @@ class StockTrackingAgent:
                 trigger_type=trigger_type,
                 trigger_mode=trigger_mode
             )
+            if scenario.get("_analysis_error"):
+                error = scenario.get("_analysis_error")
+                logger.error(f"{ticker} trading scenario analysis failed: {error}")
+                return {"success": False, "error": error, "ticker": ticker, "company_name": company_name}
 
             raw_decision = scenario.get("decision", "No entry")
             sector = scenario.get("sector", "Unknown")

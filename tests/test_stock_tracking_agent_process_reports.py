@@ -320,6 +320,78 @@ async def test_process_reports_returns_zero_for_empty_accounts(caplog):
 
 
 @pytest.mark.asyncio
+async def test_analyze_report_core_fails_on_llm_analysis_error(tmp_path):
+    agent = StockTrackingAgent.__new__(StockTrackingAgent)
+    report_path = tmp_path / "005930_Samsung_20260625_morning_gpt5.md"
+    report_path.write_text("# report", encoding="utf-8")
+
+    async def fake_extract_ticker_info(_report_path):
+        return "005930", "Samsung"
+
+    async def fake_get_current_stock_price(_ticker):
+        return 70000
+
+    async def fake_rank(_ticker):
+        return 0, "Flat"
+
+    async def fake_scenario(*args, **kwargs):
+        return {
+            "decision": "No Entry",
+            "_analysis_error": "trading_scenario_llm_failed",
+        }
+
+    agent._extract_ticker_info = fake_extract_ticker_info
+    agent._get_current_stock_price = fake_get_current_stock_price
+    agent._get_trading_value_rank_change = fake_rank
+    agent._extract_trading_scenario = fake_scenario
+    agent.trigger_info_map = {}
+
+    result = await StockTrackingAgent._analyze_report_core(agent, str(report_path))
+
+    assert result["success"] is False
+    assert result["error"] == "trading_scenario_llm_failed"
+
+
+@pytest.mark.asyncio
+async def test_process_reports_does_not_save_watchlist_when_analysis_fails(monkeypatch):
+    agent = StockTrackingAgent.__new__(StockTrackingAgent)
+    agent.account_configs = [
+        {"name": "kr-primary", "account_key": "vps:kr-primary:01"},
+    ]
+    agent.active_account = None
+    agent.max_slots = 10
+    watchlist_calls = []
+
+    async def fake_core(_report_path):
+        return {
+            "success": False,
+            "error": "trading_scenario_llm_failed",
+            "ticker": "005930",
+            "company_name": "Samsung",
+        }
+
+    async def fake_update_holdings():
+        return []
+
+    async def fake_save_watchlist_item(**kwargs):
+        watchlist_calls.append(kwargs)
+        return True
+
+    async def fake_broker_tracking_state_matches(account):
+        return True
+
+    agent._analyze_report_core = fake_core
+    agent.update_holdings = fake_update_holdings
+    agent._save_watchlist_item = fake_save_watchlist_item
+    agent._broker_tracking_state_matches = fake_broker_tracking_state_matches
+
+    buy_count, sell_count = await StockTrackingAgent.process_reports(agent, ["report-a.pdf"])
+
+    assert (buy_count, sell_count) == (0, 0)
+    assert watchlist_calls == []
+
+
+@pytest.mark.asyncio
 async def test_process_reports_saves_watchlist_once_when_not_traded(monkeypatch):
     agent = StockTrackingAgent.__new__(StockTrackingAgent)
     agent.account_configs = [
