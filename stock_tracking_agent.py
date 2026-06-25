@@ -1505,6 +1505,7 @@ class StockTrackingAgent:
             # independent of fill timing.
             pass_total_qty: Dict[str, int] = {}   # ticker -> snapshot total qty
             pass_sold_qty: Dict[str, int] = {}    # ticker -> cumulative ordered qty
+            failed_sell_tickers: set[str] = set()
 
             for stock in holdings:
                 ticker = stock.get('ticker')
@@ -1581,19 +1582,30 @@ class StockTrackingAgent:
                 should_sell, sell_reason = await self._analyze_sell_decision(stock)
 
                 if should_sell:
+                    if ticker in failed_sell_tickers:
+                        logger.warning(
+                            f"{ticker} sell already failed in this pass; keeping tracking row unchanged"
+                        )
+                        self.cursor.execute(
+                            """UPDATE stock_holdings
+                               SET current_price = ?, last_updated = ?
+                               WHERE id = ?""",
+                            (current_price, now, stock.get("id"))
+                        )
+                        self.conn.commit()
+                        continue
+
                     # Pyramiding (#288): compute remaining row count N for this
-                    # (ticker, account) BEFORE the DB row is deleted by sell_stock.
+                    # (ticker, account) BEFORE the broker order is submitted.
                     # N>1 => fractional KIS sell (floor(total/N)); N==1 => sell all
                     # (unchanged). Recomputed live each sell so the last row sweeps.
                     remaining_rows = get_existing_position_for_ticker(
                         self.cursor, ticker, account_key=stock.get("account_key")
                     ).get("row_count", 1)
 
-                    # Process sell (deletes only this row when N>1, else the ticker)
-                    sell_success = await self.sell_stock(stock, sell_reason)
-
-                    if sell_success:
-                        # Call actual account trading function (async)
+                    sell_quantity = None
+                    trade_result = {"success": False, "message": "Sell order was not submitted"}
+                    try:
                         from trading.domestic_stock_trading import AsyncTradingContext
                         async with AsyncTradingContext(account_name=stock.get("account_name")) as trading:
                             # Determine fractional sell quantity for multi-row tickers.
@@ -1616,7 +1628,6 @@ class StockTrackingAgent:
                                     pass_sold_qty[ticker] = 0
                                 available = pass_total_qty[ticker] - pass_sold_qty[ticker]
                                 sell_quantity = compute_fractional_sell_quantity(available, remaining_rows)
-                                pass_sold_qty[ticker] += sell_quantity
                                 logger.info(
                                     f"{ticker} pyramiding fractional sell: {sell_quantity} shares "
                                     f"(available {available} of snapshot {pass_total_qty[ticker]}, "
@@ -1626,11 +1637,33 @@ class StockTrackingAgent:
                             trade_result = await trading.async_sell_stock(
                                 stock_code=ticker, limit_price=current_price, quantity=sell_quantity
                             )
+                    except Exception as trade_err:
+                        trade_result = {"success": False, "message": str(trade_err)}
 
-                        if trade_result['success']:
-                            logger.info(f"Actual sell successful: {trade_result['message']}")
-                        else:
-                            logger.error(f"Actual sell failed: {trade_result['message']}")
+                    if not trade_result.get('success'):
+                        failed_sell_tickers.add(ticker)
+                        logger.error(f"Actual sell failed: {trade_result.get('message', 'Unknown error')}")
+                        self.cursor.execute(
+                            """UPDATE stock_holdings
+                               SET current_price = ?, last_updated = ?
+                               WHERE id = ?""",
+                            (current_price, now, stock.get("id"))
+                        )
+                        self.conn.commit()
+                        logger.warning(
+                            f"{ticker}({company_name}) tracking sell skipped because broker sell failed"
+                        )
+                        continue
+
+                    if sell_quantity is not None:
+                        pass_sold_qty[ticker] += sell_quantity
+                    logger.info(f"Actual sell successful: {trade_result['message']}")
+
+                    # Process tracking sell only after the broker sell succeeds
+                    # (deletes only this row when N>1, else the ticker).
+                    sell_success = await self.sell_stock(stock, sell_reason)
+
+                    if sell_success:
 
                         # [Optional] Publish sell signal via Redis Streams
                         # Auto-skipped if Redis not configured (requires UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN)

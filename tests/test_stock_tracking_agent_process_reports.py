@@ -33,7 +33,7 @@ class _FakeAsyncTradingContext:
             "failed_accounts": ["kr-secondary"],
         }
 
-    async def async_sell_stock(self, stock_code, limit_price=None):
+    async def async_sell_stock(self, stock_code, limit_price=None, quantity=None):
         return {
             "success": True,
             "message": f"sold for {self.account_name}",
@@ -45,6 +45,14 @@ class _FailingAsyncTradingContext(_FakeAsyncTradingContext):
         return {
             "success": False,
             "message": "broker rejected order",
+        }
+
+
+class _FailingSellAsyncTradingContext(_FakeAsyncTradingContext):
+    async def async_sell_stock(self, stock_code, limit_price=None, quantity=None):
+        return {
+            "success": False,
+            "message": "broker rejected sell",
         }
 
 
@@ -71,6 +79,16 @@ def _install_signal_modules(monkeypatch, redis_calls, gcp_calls):
 
     monkeypatch.setitem(sys.modules, "messaging.redis_signal_publisher", redis_module)
     monkeypatch.setitem(sys.modules, "messaging.gcp_pubsub_signal_publisher", gcp_module)
+
+
+def _install_corporate_status_stub(monkeypatch):
+    corporate_module = types.ModuleType("cores.corporate_status")
+
+    async def fetch_status_codes(tickers, account_name=None):
+        return {}
+
+    corporate_module.fetch_status_codes = fetch_status_codes
+    monkeypatch.setitem(sys.modules, "cores.corporate_status", corporate_module)
 
 
 @pytest.mark.asyncio
@@ -373,6 +391,7 @@ async def test_update_holdings_masks_sold_account_payload(monkeypatch):
     agent.cursor.execute(
         """
         CREATE TABLE stock_holdings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
             ticker TEXT,
             company_name TEXT,
             buy_price REAL,
@@ -418,6 +437,7 @@ async def test_update_holdings_masks_sold_account_payload(monkeypatch):
     agent.active_account = {"name": "kr-primary", "account_key": "vps:12345678:01"}
     agent.message_queue = []
     agent._msg_types = []
+    agent._get_live_regime_safe = lambda: None
 
     async def fake_get_current_stock_price(ticker):
         return 72000
@@ -435,6 +455,7 @@ async def test_update_holdings_masks_sold_account_payload(monkeypatch):
     redis_calls = []
     gcp_calls = []
     monkeypatch.setattr(domestic_trading, "AsyncTradingContext", _FakeAsyncTradingContext)
+    _install_corporate_status_stub(monkeypatch)
     _install_signal_modules(monkeypatch, redis_calls, gcp_calls)
 
     sold = await StockTrackingAgent.update_holdings(agent)
@@ -442,6 +463,114 @@ async def test_update_holdings_masks_sold_account_payload(monkeypatch):
     assert len(sold) == 1
     assert sold[0]["account_label"] == "kr-primary (vps:12****78:01)"
     assert "account_key" not in sold[0]
+
+
+@pytest.mark.asyncio
+async def test_update_holdings_keeps_tracking_row_when_broker_sell_fails(monkeypatch):
+    agent = StockTrackingAgent.__new__(StockTrackingAgent)
+    agent.conn = sqlite3.connect(":memory:")
+    agent.conn.row_factory = sqlite3.Row
+    agent.cursor = agent.conn.cursor()
+    agent.cursor.execute(
+        """
+        CREATE TABLE stock_holdings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker TEXT,
+            company_name TEXT,
+            buy_price REAL,
+            buy_date TEXT,
+            current_price REAL,
+            scenario TEXT,
+            target_price REAL,
+            stop_loss REAL,
+            last_updated TEXT,
+            trigger_type TEXT,
+            trigger_mode TEXT,
+            account_key TEXT,
+            account_name TEXT,
+            sector TEXT
+        )
+        """
+    )
+    agent.cursor.execute(
+        """
+        CREATE TABLE trading_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            account_key TEXT,
+            account_name TEXT,
+            ticker TEXT,
+            company_name TEXT,
+            buy_price REAL,
+            buy_date TEXT,
+            sell_price REAL,
+            sell_date TEXT,
+            profit_rate REAL,
+            holding_days INTEGER,
+            scenario TEXT,
+            trigger_type TEXT,
+            trigger_mode TEXT,
+            sector TEXT
+        )
+        """
+    )
+    agent.cursor.execute(
+        """
+        INSERT INTO stock_holdings
+        (ticker, company_name, buy_price, buy_date, current_price, scenario, target_price,
+         stop_loss, last_updated, trigger_type, trigger_mode, account_key, account_name, sector)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "006340",
+            "Daewon Cable",
+            10580,
+            "2026-06-23 16:14:47",
+            10220,
+            "{}",
+            None,
+            10000,
+            "2026-06-25 12:00:00",
+            "AI Analysis",
+            "morning",
+            "vps:12345678:01",
+            "kr-primary",
+            "Electrical",
+        ),
+    )
+    agent.conn.commit()
+    agent.active_account = {"name": "kr-primary", "account_key": "vps:12345678:01"}
+    agent.message_queue = []
+    agent._msg_types = []
+    agent._get_live_regime_safe = lambda: None
+    sell_stock_called = False
+
+    async def fake_get_current_stock_price(ticker):
+        return 9900
+
+    async def fake_analyze_sell_decision(stock):
+        return True, "Stop loss"
+
+    async def fake_sell_stock(stock, reason):
+        nonlocal sell_stock_called
+        sell_stock_called = True
+        return True
+
+    agent._get_current_stock_price = fake_get_current_stock_price
+    agent._analyze_sell_decision = fake_analyze_sell_decision
+    agent.sell_stock = fake_sell_stock
+
+    monkeypatch.setattr(domestic_trading, "AsyncTradingContext", _FailingSellAsyncTradingContext)
+    _install_corporate_status_stub(monkeypatch)
+
+    sold = await StockTrackingAgent.update_holdings(agent)
+
+    holdings = agent.cursor.execute("SELECT ticker, current_price FROM stock_holdings").fetchall()
+    history = agent.cursor.execute("SELECT ticker FROM trading_history").fetchall()
+
+    assert sold == []
+    assert sell_stock_called is False
+    assert [dict(row) for row in holdings] == [{"ticker": "006340", "current_price": 9900.0}]
+    assert history == []
 
 
 def test_safe_account_log_label_masks_account_key():
