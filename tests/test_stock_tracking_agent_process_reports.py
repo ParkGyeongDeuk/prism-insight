@@ -56,6 +56,19 @@ class _FailingSellAsyncTradingContext(_FakeAsyncTradingContext):
         }
 
 
+class _FilledBuyAsyncTradingContext(_FakeAsyncTradingContext):
+    async def async_buy_stock(self, stock_code, limit_price=None):
+        return {
+            "success": True,
+            "message": "Buy completed",
+            "current_price": 169100,
+            "avg_price": 168450,
+            "stock_name": "원익IPS",
+            "quantity": 1,
+            "total_amount": 168450,
+        }
+
+
 def _install_signal_modules(monkeypatch, redis_calls, gcp_calls):
     redis_module = types.ModuleType("messaging.redis_signal_publisher")
     gcp_module = types.ModuleType("messaging.gcp_pubsub_signal_publisher")
@@ -302,6 +315,93 @@ async def test_enhanced_process_does_not_persist_when_broker_buy_fails(monkeypat
 
     assert (buy_count, sell_count) == (0, 0)
     assert persist_calls == [False]
+
+
+@pytest.mark.asyncio
+async def test_enhanced_process_persists_broker_fill_price_and_name(monkeypatch):
+    agent = EnhancedStockTrackingAgent.__new__(EnhancedStockTrackingAgent)
+    agent.active_account = {
+        "name": "kr-primary",
+        "account_key": "vps:kr-primary:01",
+    }
+    buy_calls = []
+    redis_calls = []
+    gcp_calls = []
+
+    async def fake_true(*_args, **_kwargs):
+        return True
+
+    async def fake_no_sales():
+        return []
+
+    async def fake_analysis(_report_path):
+        return {
+            "success": True,
+            "ticker": "240810",
+            "company_name": "Stock",
+            "current_price": 159400,
+            "scenario": {
+                "buy_score": 7,
+                "min_score": 4,
+                "sector": "기계·장비",
+                "rationale": "test",
+            },
+            "decision": "Enter",
+            "sector": "기계·장비",
+            "sector_diverse": True,
+            "rank_change_msg": "Up",
+        }
+
+    async def fake_buy_stock(
+        ticker,
+        company_name,
+        current_price,
+        scenario,
+        rank_change_msg,
+        is_add=False,
+        persist=True,
+    ):
+        buy_calls.append(
+            {
+                "ticker": ticker,
+                "company_name": company_name,
+                "current_price": current_price,
+                "persist": persist,
+            }
+        )
+        return True
+
+    agent._broker_tracking_state_matches = fake_true
+    agent.update_holdings = fake_no_sales
+    agent.analyze_report = fake_analysis
+    agent.buy_stock = fake_buy_stock
+
+    monkeypatch.setattr(domestic_trading, "AsyncTradingContext", _FilledBuyAsyncTradingContext)
+    _install_signal_modules(monkeypatch, redis_calls, gcp_calls)
+
+    buy_count, sell_count = await EnhancedStockTrackingAgent.process_reports(
+        agent, ["report.md"]
+    )
+
+    assert (buy_count, sell_count) == (1, 0)
+    assert buy_calls == [
+        {
+            "ticker": "240810",
+            "company_name": "Stock",
+            "current_price": 159400,
+            "persist": False,
+        },
+        {
+            "ticker": "240810",
+            "company_name": "원익IPS",
+            "current_price": 168450,
+            "persist": True,
+        },
+    ]
+    assert redis_calls[0]["company_name"] == "원익IPS"
+    assert redis_calls[0]["price"] == 168450
+    assert gcp_calls[0]["company_name"] == "원익IPS"
+    assert gcp_calls[0]["price"] == 168450
 
 
 @pytest.mark.asyncio

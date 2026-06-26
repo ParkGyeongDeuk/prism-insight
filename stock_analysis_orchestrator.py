@@ -468,7 +468,9 @@ class StockAnalysisOrchestrator:
                             name = ""
                             # Support both Korean and English column names
                             name_col = None
-                            if "Company Name" in stocks_df.columns:
+                            if "stock_name" in stocks_df.columns:
+                                name_col = "stock_name"
+                            elif "Company Name" in stocks_df.columns:
                                 name_col = "Company Name"
                             elif "종목명" in stocks_df.columns:
                                 name_col = "종목명"

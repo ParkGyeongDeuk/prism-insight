@@ -2000,10 +2000,21 @@ class StockTrackingAgent:
 
                             if trade_result['success']:
                                 logger.info(f"Actual purchase successful: {trade_result['message']}")
+                                executed_price = float(
+                                    trade_result.get("avg_price")
+                                    or trade_result.get("current_price")
+                                    or current_price
+                                    or 0
+                                )
+                                executed_company_name = (
+                                    trade_result.get("stock_name")
+                                    or trade_result.get("company_name")
+                                    or company_name
+                                )
                                 buy_success = await self.buy_stock(
                                     ticker,
-                                    company_name,
-                                    current_price,
+                                    executed_company_name,
+                                    executed_price,
                                     scenario,
                                     rank_change_msg,
                                 )
@@ -2027,8 +2038,8 @@ class StockTrackingAgent:
 
                                     await publish_buy_signal(
                                         ticker=ticker,
-                                        company_name=company_name,
-                                        price=current_price,
+                                        company_name=executed_company_name,
+                                        price=executed_price,
                                         scenario=scenario,
                                         source="AI Analysis",
                                         trade_result=trade_result
@@ -2041,8 +2052,8 @@ class StockTrackingAgent:
 
                                     await gcp_publish_buy_signal(
                                         ticker=ticker,
-                                        company_name=company_name,
-                                        price=current_price,
+                                        company_name=executed_company_name,
+                                        price=executed_price,
                                         scenario=scenario,
                                         source="AI Analysis",
                                         trade_result=trade_result
@@ -2055,7 +2066,7 @@ class StockTrackingAgent:
                         if buy_success:
                             buy_count += 1
                             state["traded"] = True
-                            logger.info(f"Purchase complete: {company_name}({ticker}) @ {current_price:,.0f} KRW")
+                            logger.info(f"Purchase complete: {executed_company_name}({ticker}) @ {executed_price:,.0f} KRW")
                         else:
                             state["should_save_watchlist"] = True
                             state["skip_reason"] = state["skip_reason"] or "Purchase failed"

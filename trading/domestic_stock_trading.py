@@ -1416,6 +1416,34 @@ class DomesticStockTrading:
                             result['quantity'] = actual_quantity
                             result['total_amount'] = actual_quantity * current_price_info['current_price']
                             result['message'] = f"Buy completed: {actual_quantity} shares x {current_price_info['current_price']:,} KRW = {result['total_amount']:,} KRW"
+                            try:
+                                await asyncio.sleep(1.1)
+                                portfolio_after_buy = await asyncio.to_thread(self.get_portfolio)
+                                matched = next(
+                                    (
+                                        stock for stock in portfolio_after_buy
+                                        if str(stock.get('stock_code', '')).strip() == str(stock_code).strip()
+                                        and int(stock.get('quantity', 0) or 0) > 0
+                                    ),
+                                    None,
+                                )
+                                if matched:
+                                    avg_price = float(matched.get('avg_price') or 0)
+                                    stock_name = str(matched.get('stock_name') or '').strip()
+                                    if avg_price > 0:
+                                        result['avg_price'] = avg_price
+                                        result['total_amount'] = actual_quantity * avg_price
+                                    if stock_name:
+                                        result['stock_name'] = stock_name
+                                    if matched.get('current_price'):
+                                        result['current_price'] = float(matched.get('current_price') or result['current_price'])
+                                    result['message'] = (
+                                        f"Buy completed: {actual_quantity} shares x "
+                                        f"{result.get('avg_price', current_price_info['current_price']):,.0f} KRW = "
+                                        f"{result['total_amount']:,.0f} KRW"
+                                    )
+                            except Exception as confirm_err:
+                                logger.warning(f"[Async Buy API] {stock_code} post-buy portfolio confirmation failed: {confirm_err}")
                             logger.info(f"[Async Buy API] {stock_code} buy successful")
                         else:
                             result['message'] = f"Buy failed: {buy_result['message']}"
@@ -2101,6 +2129,7 @@ class MultiAccountDomesticStockTrading:
         total_amount = sum(result.get("total_amount", result.get("estimated_amount", 0)) for result in results)
         successful_accounts = [result.get("account_name") for result in results if result.get("success")]
         failed_accounts = [result.get("account_name") for result in results if not result.get("success")]
+        first_success = next((result for result in results if result.get("success")), {})
 
         messages = [
             f"{result.get('account_name')}: {result.get('message', '')}"
@@ -2129,6 +2158,9 @@ class MultiAccountDomesticStockTrading:
             "quantity": total_quantity,
             "total_amount": total_amount,
             "estimated_amount": total_amount,
+            "current_price": first_success.get("current_price", 0),
+            "avg_price": first_success.get("avg_price"),
+            "stock_name": first_success.get("stock_name"),
             "order_no": None,
             "message": f"{action} executed for {success_count}/{total_accounts} accounts | " + " ; ".join(messages),
             "account_results": results,

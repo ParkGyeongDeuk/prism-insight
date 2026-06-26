@@ -165,6 +165,7 @@ docker compose exec -T prism-insight bash -lc 'cd /app/prism-insight && set -a &
 - 모의투자 미체결 조회와 취소 식별자를 보완했다.
 - 모의투자 예약 매수 API가 실패처럼 응답해도 실제 미체결 매수 주문이 생기는 경우가 있어, 실패 응답 직후 같은 종목/수량/가격의 매수 미체결 주문을 재조회해 일치할 때만 접수 성공으로 보정한다.
 - 예약/미체결 매수 주문을 추적 DB에 복구할 때는 `scenario.order_status = reserved_open`으로 구분하고, 실제 KIS 보유로 전환되기 전에는 매도 판단 대상에서 제외한다.
+- 매수 성공 후 추적 DB의 종목명과 매수가는 분석 보고서/trigger 기준값보다 KIS 주문 결과와 사후 포트폴리오 조회값을 우선한다. 장중 시장가 매수는 분석 시점 가격과 실제 평균단가가 달라질 수 있으므로, DB `stock_holdings.buy_price`는 가능한 한 KIS 평균단가와 맞춰야 한다.
 - 매도는 KIS 브로커 주문 성공 후에만 추적 DB의 `stock_holdings` 삭제와 `trading_history` 확정을 수행한다. 브로커 실패/조회 실패 시에는 현재가만 갱신하고 보유 row를 유지한다.
 - LLM 인증/쿼터/응답 파싱 실패로 매수 시나리오가 생성되지 않은 경우에는 안전하게 매매를 건너뛰되, `watchlist_history`/`analysis_performance_tracker`에는 정상 분석 결과처럼 저장하지 않는다.
 - 주문 전후에 KIS 계좌 상태와 추적 DB 정합성을 확인한다.
