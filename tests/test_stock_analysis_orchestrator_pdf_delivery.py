@@ -30,15 +30,25 @@ def _install_fake_telegram_bot(monkeypatch):
     monkeypatch.setitem(sys.modules, "telegram_bot_agent", fake_module)
 
 
-def _orchestrator():
+def _orchestrator(broadcast_languages=None):
     orchestrator = StockAnalysisOrchestrator.__new__(StockAnalysisOrchestrator)
     orchestrator.telegram_config = SimpleNamespace(
         use_telegram=True,
         channel_id="telegram-channel",
-        broadcast_languages=[],
+        broadcast_languages=broadcast_languages or [],
     )
     orchestrator._broadcast_tasks = []
     return orchestrator
+
+
+@pytest.mark.asyncio
+async def test_convert_to_pdf_skips_converter_when_generation_disabled(monkeypatch):
+    monkeypatch.setenv("PRISM_GENERATE_PDF_REPORTS", "false")
+    monkeypatch.setitem(sys.modules, "pdf_converter", None)
+
+    pdf_paths = await _orchestrator().convert_to_pdf(["reports/005930_삼성전자.md"])
+
+    assert pdf_paths == []
 
 
 @pytest.mark.asyncio
@@ -56,6 +66,23 @@ async def test_send_telegram_messages_skips_pdf_documents_when_disabled(monkeypa
 
     assert len(bot_agent.processed) == 1
     assert bot_agent.documents == []
+
+
+@pytest.mark.asyncio
+async def test_send_telegram_messages_does_not_schedule_translated_pdfs_without_generation(monkeypatch):
+    _install_fake_telegram_bot(monkeypatch)
+    monkeypatch.setenv("PRISM_GENERATE_PDF_REPORTS", "false")
+    monkeypatch.setenv("PRISM_SEND_PDF_REPORTS", "true")
+
+    orchestrator = _orchestrator(broadcast_languages=["en"])
+
+    await orchestrator.send_telegram_messages(
+        message_paths=["telegram_messages/005930_삼성전자_telegram.txt"],
+        pdf_paths=[],
+        report_paths=["reports/005930_삼성전자.md"],
+    )
+
+    assert orchestrator._broadcast_tasks == []
 
 
 @pytest.mark.asyncio

@@ -5,7 +5,7 @@ Stock Analysis and Telegram Transmission Orchestrator
 Overall Process:
 1. Execute time-based (morning/afternoon) trigger batch jobs
 2. Generate detailed analysis reports for selected stocks
-3. Convert reports to PDF
+3. Convert reports to PDF when enabled
 4. Generate and send telegram channel summary messages
 5. Send generated PDF attachments when enabled
 """
@@ -520,7 +520,7 @@ class StockAnalysisOrchestrator:
 
     async def convert_to_pdf(self, report_paths):
         """
-        Convert markdown reports to PDF
+        Convert markdown reports to PDF when enabled
 
         Args:
             report_paths (list): List of markdown report file paths
@@ -528,6 +528,13 @@ class StockAnalysisOrchestrator:
         Returns:
             list: List of generated PDF file paths
         """
+        if not _env_flag("PRISM_GENERATE_PDF_REPORTS", default=True):
+            logger.info(
+                "PDF report generation disabled by PRISM_GENERATE_PDF_REPORTS; "
+                f"skipping {len(report_paths)} reports"
+            )
+            return []
+
         logger.info(f"Starting PDF conversion for {len(report_paths)} reports")
         pdf_paths = []
 
@@ -643,6 +650,7 @@ class StockAnalysisOrchestrator:
                 msg_type="analysis"
             )
 
+            generate_pdf_reports = _env_flag("PRISM_GENERATE_PDF_REPORTS", default=True)
             send_pdf_reports = _env_flag("PRISM_SEND_PDF_REPORTS", default=True)
 
             # Send PDF files to main channel
@@ -664,10 +672,12 @@ class StockAnalysisOrchestrator:
                 )
 
             # Send translated PDFs to broadcast channels asynchronously (non-blocking)
-            if send_pdf_reports and self.telegram_config.broadcast_languages and report_paths:
+            if generate_pdf_reports and send_pdf_reports and self.telegram_config.broadcast_languages and report_paths:
                 self._broadcast_tasks.append(
                     asyncio.create_task(self._send_translated_pdfs(bot_agent, report_paths))
                 )
+            elif not generate_pdf_reports and self.telegram_config.broadcast_languages and report_paths:
+                logger.info("Translated PDF generation disabled by PRISM_GENERATE_PDF_REPORTS")
             elif self.telegram_config.broadcast_languages and report_paths:
                 logger.info("Translated PDF transmission disabled by PRISM_SEND_PDF_REPORTS")
 
@@ -734,6 +744,10 @@ class StockAnalysisOrchestrator:
             report_paths: List of original markdown report file paths
         """
         try:
+            if not _env_flag("PRISM_GENERATE_PDF_REPORTS", default=True):
+                logger.info("Skipping translated PDF generation because PRISM_GENERATE_PDF_REPORTS is disabled")
+                return
+
             if not _env_flag("PRISM_SEND_PDF_REPORTS", default=True):
                 logger.info("Skipping translated PDF transmission because PRISM_SEND_PDF_REPORTS is disabled")
                 return
