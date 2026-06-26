@@ -7,7 +7,7 @@ services:
       - PRISM_KR_MAX_SLOTS=${PRISM_KR_MAX_SLOTS:-5}
       - PRISM_KR_TOTAL_BUDGET=${PRISM_KR_TOTAL_BUDGET:-2000000}
       - PRISM_KR_CASH_RESERVE=${PRISM_KR_CASH_RESERVE:-400000}
-      - PRISM_GENERATE_PDF_REPORTS=${PRISM_GENERATE_PDF_REPORTS:-true}
+      - PRISM_GENERATE_PDF_REPORTS=${PRISM_GENERATE_PDF_REPORTS:-false}
       - PRISM_SEND_PDF_REPORTS=${PRISM_SEND_PDF_REPORTS:-false}
       - PATH=/root/.local/bin:/app/venv/bin:/root/.cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
