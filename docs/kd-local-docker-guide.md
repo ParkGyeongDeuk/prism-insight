@@ -27,6 +27,7 @@ PRISM_OPENAI_AUTH_MODE=chatgpt_oauth
 PRISM_KR_MAX_SLOTS=5
 PRISM_KR_TOTAL_BUDGET=2000000
 PRISM_KR_CASH_RESERVE=400000
+PRISM_SEND_PDF_REPORTS=false
 ```
 
 중요:
@@ -34,6 +35,7 @@ PRISM_KR_CASH_RESERVE=400000
 - `.env`, `mcp_agent.secrets.yaml`, `trading/config/kis_devlp.yaml`에는 비밀값이 들어 있으므로 화면 공유, 커밋, 문서 복사 시 주의한다.
 - 운영 중에는 `docker compose down -v`를 사용하지 않는다. `-v`는 Docker volume을 삭제할 수 있다.
 - 실제 모의투자 판단과 주문 경로가 포함된 명령은 장중에 중복 실행하지 않도록 조심한다.
+- `PRISM_SEND_PDF_REPORTS=false`이면 Telegram 요약 메시지는 전송하지만 PDF 첨부는 보내지 않는다. PDF 파일은 계속 생성되어 `pdf_reports/`에서 직접 확인할 수 있다.
 
 ## 2. 빌드와 실행
 

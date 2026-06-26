@@ -30,6 +30,7 @@
 - 매매 판단과 Telegram 요약은 원본 `.md` 보고서를 LLM 입력 기준으로 사용한다.
 - `.md` 안의 base64 차트 이미지는 LLM 입력 전에 제거한다. 차트 이미지를 판단에 쓰려면 별도 vision gate로 명시적으로 검토한다.
 - PDF는 사용자 제공용 산출물로 유지하며, 오래된 수동 호출을 위해 PDF 텍스트 추출 fallback만 남긴다.
+- kd-local은 `PRISM_SEND_PDF_REPORTS=false`로 Telegram PDF 첨부 전송을 끈다. PDF 파일 생성은 유지하므로 필요하면 호스트의 `pdf_reports/`에서 직접 확인할 수 있고, 매매 판단과 Telegram 요약은 `.md` 기반이라 영향을 받지 않는다.
 - Telegram 요약 파일명 메타데이터는 `.md`/`.markdown`/`.pdf` 모두 같은 규칙으로 인식해야 한다. `.md` 전환 후에도 생성 파일은 `{종목코드}_{종목명}_telegram.txt` 형태로 유지되어야 전송 단계에서 누락되지 않는다.
 
 ## 절대 커밋하지 않을 파일과 데이터
@@ -62,6 +63,7 @@ PRISM_OAUTH_CALLBACK_HOST=0.0.0.0
 PRISM_KR_MAX_SLOTS=5
 PRISM_KR_TOTAL_BUDGET=2000000
 PRISM_KR_CASH_RESERVE=400000
+PRISM_SEND_PDF_REPORTS=false
 ```
 
 `docker-compose.local.yml`의 역할:

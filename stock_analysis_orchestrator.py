@@ -7,7 +7,7 @@ Overall Process:
 2. Generate detailed analysis reports for selected stocks
 3. Convert reports to PDF
 4. Generate and send telegram channel summary messages
-5. Send generated PDF attachments
+5. Send generated PDF attachments when enabled
 """
 from dotenv import load_dotenv
 load_dotenv()  # Load environment variables from .env file
@@ -40,6 +40,16 @@ logger = logging.getLogger(__name__)
 REPORTS_DIR = Path("reports")
 TELEGRAM_MSGS_DIR = Path("telegram_messages")
 PDF_REPORTS_DIR = Path("pdf_reports")
+
+FALSE_ENV_VALUES = {"0", "false", "no", "off", "n"}
+
+
+def _env_flag(name: str, default: bool = True) -> bool:
+    """Return a boolean feature flag from environment values."""
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() not in FALSE_ENV_VALUES
 
 # Create directories
 REPORTS_DIR.mkdir(exist_ok=True)
@@ -585,7 +595,7 @@ class StockAnalysisOrchestrator:
 
     async def send_telegram_messages(self, message_paths, pdf_paths, report_paths=None):
         """
-        Send telegram messages and PDF files
+        Send telegram messages and optional PDF files
 
         Args:
             message_paths (list): List of telegram message file paths
@@ -633,23 +643,33 @@ class StockAnalysisOrchestrator:
                 msg_type="analysis"
             )
 
-            # Send PDF files to main channel
-            for pdf_path in pdf_paths:
-                logger.info(f"Sending PDF file: {pdf_path}")
-                success = await bot_agent.send_document(chat_id, str(pdf_path), msg_type="pdf")
-                if success:
-                    logger.info(f"PDF file transmission successful: {pdf_path}")
-                else:
-                    logger.error(f"PDF file transmission failed: {pdf_path}")
+            send_pdf_reports = _env_flag("PRISM_SEND_PDF_REPORTS", default=True)
 
-                # Transmission interval
-                await asyncio.sleep(1)
+            # Send PDF files to main channel
+            if send_pdf_reports:
+                for pdf_path in pdf_paths:
+                    logger.info(f"Sending PDF file: {pdf_path}")
+                    success = await bot_agent.send_document(chat_id, str(pdf_path), msg_type="pdf")
+                    if success:
+                        logger.info(f"PDF file transmission successful: {pdf_path}")
+                    else:
+                        logger.error(f"PDF file transmission failed: {pdf_path}")
+
+                    # Transmission interval
+                    await asyncio.sleep(1)
+            elif pdf_paths:
+                logger.info(
+                    "PDF report transmission disabled by PRISM_SEND_PDF_REPORTS; "
+                    f"skipping {len(pdf_paths)} PDF files"
+                )
 
             # Send translated PDFs to broadcast channels asynchronously (non-blocking)
-            if self.telegram_config.broadcast_languages and report_paths:
+            if send_pdf_reports and self.telegram_config.broadcast_languages and report_paths:
                 self._broadcast_tasks.append(
-                        asyncio.create_task(self._send_translated_pdfs(bot_agent, report_paths))
-                    )
+                    asyncio.create_task(self._send_translated_pdfs(bot_agent, report_paths))
+                )
+            elif self.telegram_config.broadcast_languages and report_paths:
+                logger.info("Translated PDF transmission disabled by PRISM_SEND_PDF_REPORTS")
 
         except Exception as e:
             logger.error(f"Error during telegram message transmission: {str(e)}")
@@ -714,6 +734,10 @@ class StockAnalysisOrchestrator:
             report_paths: List of original markdown report file paths
         """
         try:
+            if not _env_flag("PRISM_SEND_PDF_REPORTS", default=True):
+                logger.info("Skipping translated PDF transmission because PRISM_SEND_PDF_REPORTS is disabled")
+                return
+
             from cores.agents.telegram_translator_agent import translate_telegram_message
 
             async def _translate_pdfs_for_lang(lang, channel_id):
