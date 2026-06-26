@@ -7,6 +7,8 @@ from typing import Any, cast
 # exercise pure time-window routing, so stub heavyweight optional dependencies
 # that may be absent in lightweight CI/local environments.
 sys.modules.setdefault("pandas", types.ModuleType("pandas"))
+pandas_stub = sys.modules["pandas"]
+setattr(pandas_stub, "DataFrame", getattr(pandas_stub, "DataFrame", object))
 crypto = sys.modules.setdefault("Crypto", types.ModuleType("Crypto"))
 cipher = sys.modules.setdefault("Crypto.Cipher", types.ModuleType("Crypto.Cipher"))
 aes = sys.modules.setdefault("Crypto.Cipher.AES", types.ModuleType("Crypto.Cipher.AES"))
@@ -26,6 +28,7 @@ class _DummyDomesticTrader:
 
     def __init__(self):
         self.called = None
+        self.mode = "demo"
 
     def buy_market_price(self, stock_code, buy_amount=None):
         self.called = ("buy_market_price", stock_code, buy_amount)
@@ -99,6 +102,28 @@ def test_smart_buy_does_not_submit_reserved_order_in_0815_kst_gap(monkeypatch):
     assert trader.called is None
 
 
+def test_smart_buy_blocks_reserved_order_in_demo_mode(monkeypatch):
+    trader = _DummyDomesticTrader()
+    monkeypatch.setattr(domestic, "_now_kst", lambda: _dt(16, 15))
+
+    result = domestic.DomesticStockTrading.smart_buy(cast(Any, trader), "005935", buy_amount=100000, limit_price=50000)
+
+    assert result["success"] is False
+    assert "paper trading reserved orders are disabled" in result["message"]
+    assert trader.called is None
+
+
+def test_smart_buy_allows_reserved_order_in_real_mode(monkeypatch):
+    trader = _DummyDomesticTrader()
+    trader.mode = "real"
+    monkeypatch.setattr(domestic, "_now_kst", lambda: _dt(16, 15))
+
+    result = domestic.DomesticStockTrading.smart_buy(cast(Any, trader), "005935", buy_amount=100000, limit_price=50000)
+
+    assert result["method"] == "reserved"
+    assert trader.called == ("buy_reserved_order", "005935", 100000, 50000)
+
+
 def test_smart_buy_does_not_submit_order_on_weekend(monkeypatch):
     trader = _DummyDomesticTrader()
     monkeypatch.setattr(domestic, "_now_kst", lambda: _weekend_dt(15, 15))
@@ -129,3 +154,25 @@ def test_smart_sell_does_not_submit_order_on_weekend(monkeypatch):
     assert result["success"] is False
     assert "market is closed" in result["message"]
     assert trader.called is None
+
+
+def test_smart_sell_blocks_reserved_order_in_demo_mode(monkeypatch):
+    trader = _DummyDomesticTrader()
+    monkeypatch.setattr(domestic, "_now_kst", lambda: _dt(16, 15))
+
+    result = domestic.DomesticStockTrading.smart_sell_all(cast(Any, trader), "005935", limit_price=50000, quantity=3)
+
+    assert result["success"] is False
+    assert "paper trading reserved orders are disabled" in result["message"]
+    assert trader.called is None
+
+
+def test_smart_sell_allows_reserved_order_in_real_mode(monkeypatch):
+    trader = _DummyDomesticTrader()
+    trader.mode = "real"
+    monkeypatch.setattr(domestic, "_now_kst", lambda: _dt(16, 15))
+
+    result = domestic.DomesticStockTrading.smart_sell_all(cast(Any, trader), "005935", limit_price=50000, quantity=3)
+
+    assert result["method"] == "reserved"
+    assert trader.called == ("sell_all_reserved_order", "005935", 50000, 3)

@@ -614,6 +614,19 @@ class DomesticStockTrading:
             return self.buy_closing_price(stock_code, buy_amount)
 
         if order_window == "reserved":
+            if self.mode != "real":
+                message = (
+                    "KIS paper trading reserved orders are disabled in kd-local "
+                    "because demo reserved orders returned IGW00009 and could not be verified."
+                )
+                logger.warning(f"[{stock_code}] {message}")
+                return {
+                    'success': False,
+                    'order_no': None,
+                    'stock_code': stock_code,
+                    'quantity': 0,
+                    'message': message
+                }
             if limit_price:
                 logger.info(f"[{stock_code}] Reserved order window (KST) - executing reserved order (limit: {limit_price:,} KRW)")
             else:
@@ -1077,6 +1090,19 @@ class DomesticStockTrading:
             return self.sell_all_closing_price(stock_code, quantity=quantity)
 
         if order_window == "reserved":
+            if self.mode != "real":
+                message = (
+                    "KIS paper trading reserved orders are disabled in kd-local "
+                    "because demo reserved orders returned IGW00009 and could not be verified."
+                )
+                logger.warning(f"[{stock_code}] {message}")
+                return {
+                    'success': False,
+                    'order_no': None,
+                    'stock_code': stock_code,
+                    'quantity': 0,
+                    'message': message
+                }
             if limit_price:
                 logger.info(f"[{stock_code}] Reserved order window (KST) - executing reserved order (limit: {limit_price:,} KRW)")
             else:
