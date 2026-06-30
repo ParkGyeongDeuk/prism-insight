@@ -210,6 +210,11 @@ KRX Data 사이트 로그인 시 이미 로그인된 계정이라는 확인 moda
 - GPT-5.4 mini: 수집 데이터를 통합한 최종 분석과 판단
 - ChatGPT OAuth proxy: OpenAI API key 대신 ChatGPT Plus/Pro 구독 기반 호출
 
+수동 실행 원칙:
+
+- 국내 분석/매매 판단 수동 실행은 가능하면 `stock_analysis_orchestrator.py --mode morning/afternoon` 경로를 사용한다.
+- 보유 종목 tracking agent를 임시 스크립트로 직접 호출할 때는 `MCPApp`/agent 생성 전에 ChatGPT OAuth proxy를 먼저 초기화한다. 그렇지 않으면 placeholder 키가 OpenAI API로 직접 전달되어 `401 invalid_api_key`가 발생할 수 있다.
+
 Perplexity key는 사용자가 발급 및 설정했다. `.env`와 필요한 secret 파일 모두에 들어갈 수 있지만 실제 값은 문서화하지 않는다.
 
 과거에는 Perplexity 미설정 상태에서도 분석이 가능한 대체 경로를 추가했다. 현재는 Perplexity 사용을 기본 운영으로 본다.

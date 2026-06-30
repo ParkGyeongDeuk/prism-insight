@@ -273,6 +273,13 @@ docker compose exec prism-insight python3 stock_analysis_orchestrator.py --mode 
 docker compose exec prism-insight python3 stock_analysis_orchestrator.py --mode afternoon
 ```
 
+보유 종목 tracking만 별도로 수동 실행해야 할 때:
+
+- 가능하면 `stock_analysis_orchestrator.py --mode morning/afternoon` 경로를 우선 사용한다. 이 경로는 ChatGPT OAuth proxy 초기화, 보고서 생성, Telegram 전송, tracking batch, KIS 모의투자 주문 경로를 함께 관리한다.
+- 임시 Python 스크립트로 `StockTrackingAgent` 또는 `EnhancedStockTrackingAgent`를 직접 호출할 때는 `MCPApp`/agent 생성 전에 `cores.chatgpt_proxy.inject_env()`와 `start_proxy()`를 먼저 호출해야 한다.
+- 이 초기화 없이 LLM을 호출하면 `chatgpt-oauth-placeholder`가 실제 OpenAI API로 직접 전달되어 `401 invalid_api_key`가 발생할 수 있다.
+- 수동 실행이 끝나면 `stop_proxy()`를 호출해 프록시를 정리한다.
+
 주의:
 
 - `stock_analysis_orchestrator.py --mode morning/afternoon`은 보고서 생성, Telegram 전송, tracking batch, KIS 모의투자 주문 경로를 포함한다.
