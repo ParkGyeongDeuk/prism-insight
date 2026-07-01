@@ -1,5 +1,10 @@
 services:
   prism-insight:
+    extra_hosts:
+      # Local experiment: pin KRX Akamai edge while keeping Host=data.krx.co.kr.
+      # Override with PRISM_KRX_FORCE_IP if this edge becomes slow or unavailable.
+      - "data.krx.co.kr:${PRISM_KRX_FORCE_IP:-23.53.2.121}"
+
     environment:
       - ENABLE_CRON=${PRISM_ENABLE_CRON:-false}
       - PRISM_OPENAI_AUTH_MODE=${PRISM_OPENAI_AUTH_MODE:-chatgpt_oauth}

@@ -134,6 +134,22 @@ docker compose exec prism-insight bash -lc 'cd /app/prism-insight && set -a && .
 
 결과가 `5`이면 `PRISM_KR_MAX_SLOTS=5`가 정상 적용된 것이다.
 
+KRX IP 고정 확인:
+
+```bash
+docker compose exec prism-insight getent hosts data.krx.co.kr
+```
+
+`docker-compose.local.yml`은 KRX 지연/timeout 관측을 위해 `data.krx.co.kr`을 기본 `23.53.2.121`에 고정한다. URL 자체를 IP로 바꾸는 것이 아니라 컨테이너 `/etc/hosts`에서만 고정하므로 Host 헤더와 쿠키 도메인은 그대로 유지된다.
+
+다른 IP를 시험하려면 컨테이너 재생성 전에 `.env`에 다음 값을 추가하거나 바꾼다.
+
+```bash
+PRISM_KRX_FORCE_IP=23.53.2.121
+```
+
+고정이 오히려 느리거나 실패하면 해당 값을 다른 Akamai IP로 바꾼 뒤 컨테이너를 재생성하거나, `docker-compose.local.yml`의 `extra_hosts` 항목을 제거해 기본 DNS 경로로 원복한다.
+
 ## 5. 컨테이너 안으로 들어가기
 
 일반 shell 접속:

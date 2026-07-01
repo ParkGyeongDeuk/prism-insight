@@ -66,6 +66,7 @@ PRISM_KR_TOTAL_BUDGET=2000000
 PRISM_KR_CASH_RESERVE=400000
 PRISM_GENERATE_PDF_REPORTS=false
 PRISM_SEND_PDF_REPORTS=false
+PRISM_KRX_FORCE_IP=23.53.2.121
 ```
 
 `docker-compose.local.yml`의 역할:
@@ -74,6 +75,7 @@ PRISM_SEND_PDF_REPORTS=false
 - `trading/config/kis_devlp.yaml`을 컨테이너에 bind mount한다.
 - ChatGPT OAuth token을 Docker volume `prism-auth`에 보존한다.
 - `docker/crontab.kd`를 컨테이너의 `/app/prism-insight/docker/crontab`으로 mount한다.
+- KRX 지연/timeout 관측을 위해 `data.krx.co.kr`을 로컬 실험 IP로 고정할 수 있다. URL 자체는 도메인을 유지하고 `/etc/hosts` 수준에서만 고정한다.
 - OAuth callback port `1455`를 `127.0.0.1`에만 노출한다.
 
 ## 로컬 테스트 의존성
